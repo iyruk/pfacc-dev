@@ -89,18 +89,22 @@ async loadDataFromUrlThatReferencesCloudStorageFile(link) =>
       }
     }
     let fileName = dataParamValue.split("~").slice(-1)[0];
+    console.log("[loadDataFromUrl] fileName:", fileName);
     let fileUrl = "https://user-uploads.perchance.org/file/"+fileName;
+    console.log("[loadDataFromUrl] fileUrl:", fileUrl);
 
     let blob = await fetch(fileUrl, {signal:AbortSignal.timeout ? AbortSignal.timeout(15000) : null}).then(res => res.blob());
+    console.log("[loadDataFromUrl] blob fetched, size:", blob.size, "type:", blob.type);
     let text;
     if(fileUrl.endsWith(".gz")) {
       let decompressedBlob = await decompressBlobWithGzip(blob);
       text = await decompressedBlob.text();
     } else {
-      // can add other file formats in the future if needed
-      throw new Error("Invalid share URL.");
+      text = await blob.text();
     }
+    console.log("[loadDataFromUrl] text length:", text.length);
     let data = JSON.parse(text);
+    console.log("[loadDataFromUrl] parsed JSON, keys:", Object.keys(data), "formatName:", data.formatName);
     loadingModal.delete();
     return data;
   } catch(e) {
