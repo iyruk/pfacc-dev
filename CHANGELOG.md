@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- index.html: the context info editor (`#contextInfoEdit`) now spans 95% width and its textarea auto-grows to fit its content (no internal scrolling), instead of a fixed 80%-wide, 3-row box.
+- index.html: the context info editor (`#contextInfoEdit`) now spans 95% width, left-aligns its content, and its textarea auto-grows to fit its content (no internal scrolling), instead of a fixed 80%-wide, center-aligned, 3-row box.
 
 ## [0.2.0] - 2026-08-19
 
