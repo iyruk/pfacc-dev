@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > been done — new sessions read it (via `AGENTS.md`) to understand project history
 > without needing git or chat history.
 
+## [0.3.0] - 2026-08-21
+
+### Changed
+
+- index.html: the character editor "Memory" tab is now split into sub-tabs — **General** (lorebook usage in other threads, context-limit fitting method, extended character memory), **Context Info** (enable switch, info, prompt), and **Detailed Context Info** (enable switch, info, prompt) — via a new `__charEditorMemorySubTab` hidden input and `__setCharEditorMemorySubTab` switcher.
+- index.html: the "enable context info updates" and "enable detailed context info updates" dropdowns are now toggle switches shown at the top of their sub-tabs (`__toggleCharEditorEnabled`).
+- index.html: the "Extended character memory" dropdown is now a toggle switch and moved to the top of the General sub-tab (still hidden when summaries are disabled).
+- index.html: the Context Info and Detailed Context Info text/prompt textareas no longer cap at `8rem` and now auto-grow to fit their content, including re-fitting when a sub-tab is opened and while typing.
+
 ## [0.2.1] - 2026-08-21
 
 ### Changed

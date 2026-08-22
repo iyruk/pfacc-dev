@@ -1548,8 +1548,8 @@ notes to self:
 
     function updateFitHeights() { // settimeout to ensure rendered
       ctn.querySelectorAll("textarea[data-height=fit-content]").forEach(el => {
-        let minHeight = el.offsetHeight; // textareas will always have min-height set, so we can use that via offsetHeight
-        el.style.height = Math.max(minHeight, (el.scrollHeight+10)) + "px";
+        el.style.height = "auto";
+        el.style.height = (el.scrollHeight + 10) + "px";
       });
     }
 
@@ -1691,11 +1691,15 @@ notes to self:
           el.closest("section").style.display = "none";
         }
       }
+      updateFitHeights();
     }
     updateInputVisibilies();
     for(const el of [...ctn.querySelectorAll("[data-spec-key]")]) {
       el.addEventListener("input", updateInputVisibilies);
     }
+    ctn.querySelectorAll("textarea[data-height=fit-content]").forEach(el => {
+      el.addEventListener("input", updateFitHeights);
+    });
 
     let promptResolver;
 
@@ -7245,6 +7249,35 @@ fitMessagesInContextMethod: "dropOld",
     if(btn) btn.classList.add("active");
   };
 
+  // Character editor memory sub-tab switcher (General / Context Info / Detailed Context Info)
+  window.__setCharEditorMemorySubTab = function(tab, btn) {
+    let el = document.querySelector('[data-spec-key="__charEditorMemorySubTab"]');
+    if(el) {
+      el.value = tab;
+      el.dispatchEvent(new Event("input"));
+    }
+    document.querySelectorAll(".charEditorMemorySubTabs button").forEach(b => b.classList.remove("active"));
+    if(btn) btn.classList.add("active");
+  };
+
+  // Toggle switch used by the character editor's enable/disable toggles.
+  // The button may carry data-on / data-off values (default "yes"/"no").
+  window.__toggleCharEditorEnabled = function(btn) {
+    let hidden = btn.parentElement.querySelector("input[data-spec-key][type=hidden]");
+    if(!hidden) return;
+    let onValue = btn.dataset.on || "yes";
+    let offValue = btn.dataset.off || "no";
+    let on = hidden.value !== onValue;
+    hidden.value = on ? onValue : offValue;
+    hidden.dispatchEvent(new Event("input"));
+    btn.style.background = on ? "#2e9e44" : "var(--button-bg)";
+    let knob = btn.querySelector("span");
+    if(knob) {
+      knob.style.left = on ? "auto" : "0.12rem";
+      knob.style.right = on ? "0.12rem" : "auto";
+    }
+  };
+
   // Context info "last updated X ago" label in the message feed
   function formatContextInfoRelativeTime(ts) {
     if(!ts) return "";
@@ -8590,9 +8623,18 @@ fitMessagesInContextMethod: "dropOld",
       </div>
       <input type="hidden" data-spec-key="__charEditorActiveTab" value="personality">
       `, type:"none" },
+      __charEditorMemorySubTabs: { show: d => d.__charEditorActiveTab === "memory", html: `
+      <div class="charEditorMemorySubTabs" style="display:flex; gap:0.3rem; overflow-x:auto; background:var(--box-color); border:1px solid var(--border-color); border-radius:var(--border-radius); padding:0.35rem; margin-bottom:0.25rem;">
+        <button type="button" class="active" onclick="window.__setCharEditorMemorySubTab('general', this)">${faIcon("sliders") || "⚙️"} General</button>
+        <button type="button" onclick="window.__setCharEditorMemorySubTab('context', this)">${faIcon("scroll") || "📜"} Context Info</button>
+        <button type="button" onclick="window.__setCharEditorMemorySubTab('detailed', this)">${faIcon("book-open") || "📖"} Detailed Context Info</button>
+      </div>
+      <input type="hidden" data-spec-key="__charEditorMemorySubTab" value="general">
+      `, type:"none" },
       name: {},
       tagline: {},
       __charEditorActiveTab: {},
+      __charEditorMemorySubTab: {},
       roleInstruction: {show: (values) => values.__charEditorActiveTab === "personality",  label: `🎭 Character description/personality/instruction/role. <i style="opacity:0.7;">This should ideally be less than 1000 words (<a href='https://rentry.org/5y38k' target='_blank'>read more</a>). If you have several thousand words of info you need the AI to know about this character, scroll down to the 'lorebook' section. Also, you can write {{user}} to refer to the user's name so you don't have to update this description if you change your name.</i>`, infoTooltip:`This note defines the personality or 'role' that the AI will take during the chat. Every writing request to the AI will include this text. If you later decide to edit this, all existing and new threads will be immediately updated, so you don't need to start a fresh chat for it to take effect. This text will never get 'summarized away' by the summarization algorithm - it will *always* be present as the first message. If you make this text too long, it'll reduce the longer-term memory of your bot.`, type:"text", height:"fit-content", placeholder: "Include the most important details first. Also, it's a good idea to include example dialogue if you can - show the AI how you want the character to speak.", defaultValue: defaultValues.roleInstruction || "" },
       roleInstructionGeneration: {show: (values) => values.__charEditorActiveTab === "personality",  // nap addition
         label: null,
@@ -8795,23 +8837,29 @@ fitMessagesInContextMethod: "dropOld",
         minHeight: "3rem",
         defaultValue: promptedCharacter?.customData?.writingFormat || ""
       },
-      contextInfo: {show: (values) => values.__charEditorActiveTab === "memory", 
+      contextInfoToggleRow: { show: d => d.__charEditorActiveTab === "memory" && d.__charEditorMemorySubTab === "context", html: `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; margin:0.75rem 0 0.25rem;">
+          <span style="font-size:0.85rem;">Enable context info updates</span>
+          <button type="button" onclick="window.__toggleCharEditorEnabled(this)" style="width:2.2rem; height:1.2rem; border-radius:100px; border:1px solid var(--border-color); background:${promptedCharacter.customData?.contextInfo?.basic?.enabled === "yes" ? "#2e9e44" : "var(--button-bg)"}; position:relative; cursor:pointer; padding:0; transition:background var(--transition); flex-shrink:0;">
+            <span style="position:absolute; top:50%; transform:translateY(-50%); ${promptedCharacter.customData?.contextInfo?.basic?.enabled === "yes" ? "right:0.12rem;" : "left:0.12rem;"} width:0.9rem; height:0.9rem; border-radius:50%; background:#fff; display:block;"></span>
+          </button>
+          <input type="hidden" data-spec-key="contextInfoToggle" value="${promptedCharacter.customData?.contextInfo?.basic?.enabled === "yes" ? "yes" : "no"}">
+        </div>`, type: "none" },
+      contextInfo: {show: (values) => values.__charEditorActiveTab === "memory" && values.__charEditorMemorySubTab === "context", 
         label: `📜 Context Info. <i style="opacity:0.7;">This should ideally be a brief overview (under 500 words). For a more detailed explanation, see the 'Detailed Context Info' section below.</i>`,
         infoTooltip: `This section provides a quick summary of the essential context the AI should be aware of during the chat. It ensures that the AI stays aligned with the intended scenario, setting, or theme. Keep it concise and to the point to maximize efficiency.`,
         type: "text",
         height: "fit-content",
         minHeight: "2rem",
-        maxHeight: "8rem",
         placeholder: "Provide a short and clear summary of the most critical details.",
         defaultValue: promptedCharacter?.customData?.contextInfo?.basic?.info || ``
       },
-      contextInfoPrompt: {show: (values) => values.__charEditorActiveTab === "memory", 
+      contextInfoPrompt: {show: (values) => values.__charEditorActiveTab === "memory" && values.__charEditorMemorySubTab === "context", 
         label: `🔮 Context Info Prompt. <i style="opacity:0.7;">This prompt is used to dynamically generate the context info when needed.</i>`,
         infoTooltip: `Use this prompt to instruct the AI to dynamically generate the context info based on the current scenario or setting. This is helpful if you'd like the AI to generate context info on-the-fly rather than manually writing it out.`,
         type: "text",
         height: "fit-content",
         minHeight: "2rem",
-        maxHeight: "8rem",
         placeholder: "Provide a prompt to instruct the AI to generate the context info dynamically.",
         defaultValue: promptedCharacter?.customData?.contextInfo?.basic?.prompt || `Using the previous context information, messages, and other input information, update the context information for the new message. The new message should be integrated with the most recent date, time, and location. The context info includes the character’s status, inventory, and location at the time of this message.
 
@@ -8833,24 +8881,30 @@ fitMessagesInContextMethod: "dropOld",
   Date: [Date - Weekday, Month Day, Year]
   `
       }, // "yes"
-      contextInfoToggle: {show: (values) => values.__charEditorActiveTab === "memory",  label: "Enable context info updates?:", type: "select", options: [{ value: "yes" }, { value: "no" }], defaultValue: promptedCharacter.customData?.contextInfo?.basic?.enabled === "yes" ? "yes" : "no" },
-      detailedContextInfo: {show: (values) => values.__charEditorActiveTab === "memory", 
+      contextInfoToggle: {},
+      detailedContextInfoToggleRow: { show: d => d.__charEditorActiveTab === "memory" && d.__charEditorMemorySubTab === "detailed", html: `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; margin:0.75rem 0 0.25rem;">
+          <span style="font-size:0.85rem;">Enable detailed context info updates</span>
+          <button type="button" onclick="window.__toggleCharEditorEnabled(this)" style="width:2.2rem; height:1.2rem; border-radius:100px; border:1px solid var(--border-color); background:${promptedCharacter.customData?.contextInfo?.detailed?.enabled === "yes" ? "#2e9e44" : "var(--button-bg)"}; position:relative; cursor:pointer; padding:0; transition:background var(--transition); flex-shrink:0;">
+            <span style="position:absolute; top:50%; transform:translateY(-50%); ${promptedCharacter.customData?.contextInfo?.detailed?.enabled === "yes" ? "right:0.12rem;" : "left:0.12rem;"} width:0.9rem; height:0.9rem; border-radius:50%; background:#fff; display:block;"></span>
+          </button>
+          <input type="hidden" data-spec-key="detailedContextInfoToggle" value="${promptedCharacter.customData?.contextInfo?.detailed?.enabled === "yes" ? "yes" : "no"}">
+        </div>`, type: "none" },
+      detailedContextInfo: {show: (values) => values.__charEditorActiveTab === "memory" && values.__charEditorMemorySubTab === "detailed", 
         label: `📖 Detailed Context Info. <i style="opacity:0.7;">Use this section for in-depth explanations, extended lore, or complex mechanics. If you have extensive details, consider linking an external document.</i>`,
         infoTooltip: `This section is for comprehensive background information. It allows for detailed lore, complex mechanics, or other specifics the AI should consistently reference. Be mindful that too much text may reduce the AI's long-term memory efficiency.`,
         type: "text",
         height: "fit-content",
         minHeight: "2rem",
-        maxHeight: "8rem",
         placeholder: "Provide an expanded explanation, including relevant details and mechanics.",
         defaultValue: promptedCharacter?.customData?.contextInfo?.detailed?.info || ``
       },
-      detailedContextInfoPrompt: {show: (values) => values.__charEditorActiveTab === "memory", 
+      detailedContextInfoPrompt: {show: (values) => values.__charEditorActiveTab === "memory" && values.__charEditorMemorySubTab === "detailed", 
         label: `🔮 Detailed Context Info Prompt. <i style="opacity:0.7;">This prompt is used to dynamically generate the detailed context info when needed.</i>`,
         infoTooltip: `Use this prompt to instruct the AI to dynamically generate detailed context info based on specific requests. This is useful when you want to automate the creation of detailed lore or complex information, allowing for dynamic and adaptive content generation.`,
         type: "text",
         height: "fit-content",
         minHeight: "2rem",
-        maxHeight: "8rem",
         placeholder: "Provide a prompt to instruct the AI to generate detailed context info dynamically.",
         defaultValue: promptedCharacter?.customData?.contextInfo?.detailed?.prompt || `Using the previous detailed context information, messages, and other input information, update the detailed context with the latest actions, stats, and any character-specific events. Update any relevant character details such as health, inventory, or status effects. Any new interactions, decisions, or changes in character stats should be reflected in this detailed update.
 
@@ -8902,7 +8956,7 @@ fitMessagesInContextMethod: "dropOld",
   - Visit the local tavern to gather more information. (Example)
   IMPORTANT NOTE: These are just examples, while you need to include stats for different characters, only do relevant stats.`
       },
-      detailedContextInfoToggle: {show: (values) => values.__charEditorActiveTab === "memory",  label: "Enable detailed context info updates?:", type: "select", options: [{ value: "yes" }, { value: "no" }], defaultValue: promptedCharacter.customData?.contextInfo?.detailed?.enabled === "yes" ? "yes" : "no" },
+      detailedContextInfoToggle: {},
       initialMessagesText: {show: (values) => values.__charEditorActiveTab === "chat",  label: `💬 Initial chat messages. <i style="opacity:0.7;">You can use this to teach the AI how this character typically speaks, and/or to define an initial scenario. Follow the "<b>[AI]:</b> ... <b>[USER]:</b> ..." format which is fully explained <a href="https://rentry.org/uws8dv" target='blank'>here</a>.</i>`, infoTooltip:"During the creation of every new chat thread with this character, these messages will be created and placed at the start of the thread. Note that the summarization algorithm will eventually summarize these messages - so they won't stay around forever (unlike the description/instruction and reminder note, which *do* stay around forever). Also note that if you edit the initial messages in the box below, only *new* chat threads that you create will have the updated initial messages. Existing/old threads will have the old initial messages.", type:"text", height:"fit-content", placeholder: "[USER]: hey\n[AI]: um hi\n[SYSTEM; hiddenFrom=ai]: The AI can't see this message. Useful for user instructions / welcome messages / credits / etc.", defaultValue: initialMessagesText ?? "" },
       userCharacterReminderMessage: {show: (values) => values.__charEditorActiveTab === "chat",   label: `💭 User reminder note. <i style="opacity:0.7;">In case you get the AI to write on your behalf, this is the reminder note used in that case.</i>`, height:"fit-content", minHeight:"3rem", type:"text", placeholder: `(optional) e.g. "Responses should be short and creative. Always stay in character."`, defaultValue: defaultValues.userCharacter?.reminderMessage || "" },
       sceneBackgroundUrl: {show: (values) => values.__charEditorActiveTab === "appearance",   label: `🖼️ Chat background image/video URL. <i style="opacity:0.7;">(jpg, webp, webm, mp4, etc.)</i>`, type:"textLine", defaultValue: defaultValues.scene?.background?.url ?? "" },
@@ -8911,7 +8965,15 @@ fitMessagesInContextMethod: "dropOld",
       imagePromptPrefix: {show: (values) => values.__charEditorActiveTab === "appearance",   label: `🖼️➡️ Image generation prompt starter. <i style="opacity:0.7;">This text will be automatically added to the <b style='text-decoration:underline;'>start</b> of all image generation requests. This text will strongly affect the style and content of the generated images. You can use <a href='https://perchance.org' target='_blank'>Perchance</a> syntax and <a href='/text-to-image-plugin' target='_blank'>text-to-image-plugin</a> prompt syntax.</i>`, type:"textLine", defaultValue: defaultValues.imagePromptPrefix ?? "", placeholder:'ghibli style anime art, {soft|pastel} colors, ' },
       imagePromptSuffix: {show: (values) => values.__charEditorActiveTab === "appearance",   label: `🖼️🔚 Image generation prompt ending. <i style="opacity:0.7;">This text will be automatically added to the <b style='text-decoration:underline;'>end</b> of all image generation requests. You can use <a href='https://perchance.org' target='_blank'>Perchance</a> syntax and <a href='/text-to-image-plugin' target='_blank'>text-to-image-plugin</a> prompt syntax.</i>`, type:"textLine", defaultValue: defaultValues.imagePromptSuffix ?? "", placeholder:', breathtaking visual, (negativePrompt:::blurry, bad quality)' },
       imagePromptTriggers: {show: (values) => values.__charEditorActiveTab === "appearance",   height:"fit-content", cssText:"white-space:pre; font-family:monospace;", label: `🖼️🪤 Image prompt keyword triggers. <i style="opacity:0.7;">Use this feature to add situation-specific visual info about characters, places, etc. The word/phrase before the ":" is the trigger. If that trigger text appears in any image generation prompt that the AI writes in your chat, then the "description" text that you write after the ":" will be added to the <u>end</u> of the existing image prompt. Each line should be look like <span style="background: #747474; border-radius: 2px; padding: 0 0.125rem; white-space:pre;">the trigger: the description text...</span>. If you want the description text to be added to the <u>start</u> of the text, write "@prepend" at the start of the description.</i>`, type:"text", defaultValue: defaultValues.imagePromptTriggers ?? "", placeholder:`Katie: Katie has brown hair, green eyes and a bob haircut. She [...]\nFruiford: Fruiford is a city with large stone walls and [...]\nCarrot Boy: Carrot Boy is a supervillain who [...]\n/your.?regex.*pattern/: Here's a regex-triggered {example|demo} with Perchance syntax.\nBlah: @prepend This text will be added to the start of the prompt when the AI writes 'Blah' in an image generation prompt in your chat.` },
-      petraCustomLorebookUsageOptions: {show: (values) => values.__charEditorActiveTab === "memory",  // petra addition window.petraCustomLorebookUsageOptions
+      autoGenerateMemoriesToggleRow: { show: d => d.__charEditorActiveTab === "memory" && d.__charEditorMemorySubTab === "general" && d.fitMessagesInContextMethod === "summarizeOld", html: `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.75rem; margin:0.75rem 0 0.25rem;">
+          <span style="font-size:0.85rem;">Extended character memory (AI response will be slower, but often smarter) <span class="promptInfoIcon" data-info-html="${encodeURIComponent("This gives the character the ability to 'save' memories, and 'recall' them when they're relevant. It basically allows the character to remember stuff from waaaay back in the chat history - like, thousands of messages ago. It makes the AI's response a bit slower, but the character will be smarter. You can use /mem to manually add memories. Currently memories are not referenced 'across' threads - i.e. characters can't recall details from *other* chat threads. You can manually copy memories over into a new thread if needed.")}" onclick="event.stopPropagation(); alert(this.dataset.infoHtml ? decodeURIComponent(this.dataset.infoHtml).replace(/<[^>]*>/g, '') : '')">ℹ️</span></span>
+          <button type="button" data-on="v1" data-off="none" onclick="window.__toggleCharEditorEnabled(this)" style="width:2.2rem; height:1.2rem; border-radius:100px; border:1px solid var(--border-color); background:${(defaultValues.autoGenerateMemories ?? "none") === "v1" ? "#2e9e44" : "var(--button-bg)"}; position:relative; cursor:pointer; padding:0; transition:background var(--transition); flex-shrink:0;">
+            <span style="position:absolute; top:50%; transform:translateY(-50%); ${(defaultValues.autoGenerateMemories ?? "none") === "v1" ? "right:0.12rem;" : "left:0.12rem;"} width:0.9rem; height:0.9rem; border-radius:50%; background:#fff; display:block;"></span>
+          </button>
+          <input type="hidden" data-spec-key="autoGenerateMemories" value="${(defaultValues.autoGenerateMemories ?? "none") === "v1" ? "v1" : "none"}">
+        </div>`, type: "none" },
+      petraCustomLorebookUsageOptions: {show: (values) => values.__charEditorActiveTab === "memory" && values.__charEditorMemorySubTab === "general",  // petra addition window.petraCustomLorebookUsageOptions
           
           label: "📖 Choose how this character's lorebooks are used when posting in other threads where this character is not the main character.",
           type: "select",
@@ -8923,9 +8985,9 @@ fitMessagesInContextMethod: "dropOld",
           defaultValue: defaultValues.petraCustomLorebookUsageOptions || "default"
       },
       loreBookUrlsText: {show: (values) => values.__charEditorActiveTab === "lore",   height:"fit-content", cssText:"white-space:pre; font-family:monospace;", label: `📖 Lorebook URLs - one URL per line. <i style="opacity:0.7;">URL should generally end in <b>.txt</b>. Use <a href='https://perchance.org/upload' target='_blank'>perchance.org/upload</a> to upload your lore files. Each lore file/URL can contain <i>thousands</i> of entries, so you will most often need only <b>one</b> URL in the box below. Each entry within a particular lore file/URL should be a fact about the character/world, and should be no longer than one or two sentences. There should be a blank line between entries/sentences in the file. For lorebook changes to propagate to <b>preexisting</b> threads, you need to use the <b style="white-space:nowrap;">/lore</b> command and click the reload button. Visit <a href='https://rentry.org/fptk4' target='_blank'>this page</a> to learn more.</i>`, type:"text", height:"fit-content", defaultValue: loreBookUrlsText, placeholder: "https://example.com/my-character-lore.txt\nhttps://example.com/my-world-lore.txt\nhttps://example.com/misc-knowledge-base.txt" },
-      fitMessagesInContextMethod: {show: (values) => values.__charEditorActiveTab === "memory",   label: "Method for fitting messages within model's context limit.", infoTooltip:"You should only disable summaries if you don't need your AI to remember stuff from several-dozen messages ago. For example, the AI Artist example character has summaries disabled because the really old messages aren't relevant to what the user is currently asking the AI to create, so there's no need to include a summarized version of those old messages in the text that we give to the AI for use in generating its response. But most 'normal' characters will benefit from summaries of old messages.", type:"select", options:[{value:"dropOld", content:"ignore oldest messages (not recommended)"}, {value:"summarizeOld", content:"summarize oldest messages"}], defaultValue: defaultValues.fitMessagesInContextMethod ?? "summarizeOld" },
+      fitMessagesInContextMethod: {show: (values) => values.__charEditorActiveTab === "memory" && values.__charEditorMemorySubTab === "general",   label: "Method for fitting messages within model's context limit.", infoTooltip:"You should only disable summaries if you don't need your AI to remember stuff from several-dozen messages ago. For example, the AI Artist example character has summaries disabled because the really old messages aren't relevant to what the user is currently asking the AI to create, so there's no need to include a summarized version of those old messages in the text that we give to the AI for use in generating its response. But most 'normal' characters will benefit from summaries of old messages.", type:"select", options:[{value:"dropOld", content:"ignore oldest messages (not recommended)"}, {value:"summarizeOld", content:"summarize oldest messages"}], defaultValue: defaultValues.fitMessagesInContextMethod ?? "summarizeOld" },
       // textEmbeddingModelName: {  label: "Text embedding model:", infoTooltip:"Yep, there's currently only one option for this. Will add more in the future. It's what converts each memory/lore entry (text) into a bunch of numbers that can be efficiently used for search/similarity/lookup.", type:"select", options:[], defaultValue: defaultValues.textEmbeddingModelName ?? "text-embedding-ada-002" },
-      autoGenerateMemories: {  show:d=>d.__charEditorActiveTab === "memory" && d.fitMessagesInContextMethod==="summarizeOld", label: "💽 Extended character memory (AI response will be slower, but often smarter)", infoTooltip:"This gives the character the ability to 'save' memories, and 'recall' them when they're relevant. It basically allows the character to remember stuff from waaaay back in the chat history - like, thousands of messages ago. It makes the AI's response a bit slower, but the character will be smarter. You can use /mem to manually add memories. Currently memories are not referenced 'across' threads - i.e. characters can't recall details from *other* chat threads. You can manually copy memories over into a new thread if needed.", type:"select", options:[{value:"none", content:"Long-term memory 𝗱𝗶𝘀𝗮𝗯𝗹𝗲𝗱"}, {value:"v1", content:"Long-term memory 𝗲𝗻𝗮𝗯𝗹𝗲𝗱"}], defaultValue: defaultValues.autoGenerateMemories ?? "none" },
+      autoGenerateMemories: {},
       avatarSize: {show: (values) => values.__charEditorActiveTab === "personality",   label: `📏 <b>Character</b>'s avatar pic size. <i style="opacity:0.7;">As a multiple of the default size (i.e. 2 means twice as big).</i>`, type:"textLine", defaultValue: defaultValues.avatar?.size ?? "1" },
       avatarShape: {show: (values) => values.__charEditorActiveTab === "personality",   label: `🟦 <b>Character</b>'s avatar shape.`, type:"select", options:[{value:"square"}, {value:"circle"}, {value:"portrait"}], defaultValue: defaultValues.avatar?.shape ?? "square" },
       userAvatarSize: {show: (values) => values.__charEditorActiveTab === "appearance",   label: `📏 <b>User</b>'s avatar pic size. <i style="opacity:0.7;">As a multiple of the default size (i.e. 2 means twice as big).</i>`, type:"textLine", placeholder:"leave blank to fallback to user's default settings", defaultValue: defaultValues.userCharacter?.avatar?.size ?? "" },
