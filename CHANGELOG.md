@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > been done — new sessions read it (via `AGENTS.md`) to understand project history
 > without needing git or chat history.
 
+## [0.6.7] - 2026-09-11
+
+### Added
+
+- index.html: added automatic Scene detection and creation on Dexie backup and URL share imports in `tryImportingDexieFile`. When importing threads exported with scene data or flags (e.g. from `pfplot-dev-alt`), automatically creates a corresponding custom Scene in `db.misc["customScenes"]` (preventing duplicates), attaches the scene to the thread (`thread.scene`), and injects a clean Narrator opening message using `openingNarration` if no narration message exists.
+- index.html: exposed `getScenes`, `saveScenes`, and `getDefaultScenes` to `window` for cross-module accessibility across separate script blocks.
+- index.html: added visual toast confirmation upon import indicating which scene was created and attached.
+
 ## [0.6.6] - 2026-09-11
 
 ### Changed

@@ -8175,6 +8175,9 @@ fitMessagesInContextMethod: "dropOld",
   async function saveScenes(scenes) {
     await db.misc.put({ key: "customScenes", value: scenes });
   }
+  window.getScenes = getScenes;
+  window.saveScenes = saveScenes;
+  window.getDefaultScenes = getDefaultScenes;
 
   async function getSceneById(id) {
     if(!id) return null;
@@ -21092,6 +21095,7 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
     let originalDbJsonBlob;
 
     let singleThreadImportId = null;
+    let newlyCreatedScenes = [];
 
     try {
       
@@ -21327,6 +21331,77 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
         }
       }
 
+      // Handle imported scenes on threads (e.g. exported from pfplot or another pfacc instance)
+      for(let thread of importedThreads) {
+        let hasSceneFlag = thread.createScene || thread.customData?.createScene;
+        let sceneData = thread.customData?.sceneData;
+        let rawScene = thread.scene || thread.customData?.scene;
+
+        if (hasSceneFlag || rawScene || sceneData) {
+          let sceneTitle = (sceneData?.title || rawScene?.title || thread.name || "Imported Scene").trim();
+          let sceneOverview = (sceneData?.summary || rawScene?.overview || "").trim();
+          let sceneSetting = (sceneData?.worldInfo || rawScene?.setting || "").trim();
+          let sceneOpening = (sceneData?.introScene || rawScene?.openingNarration || "").trim();
+          let sceneTags = Array.isArray(rawScene?.tags) && rawScene.tags.length ? rawScene.tags : ["Story"];
+
+          if (sceneTitle || sceneOverview || sceneSetting || sceneOpening) {
+            let sceneId = rawScene?.id || ("scene_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7));
+            let finalScene = {
+              id: sceneId,
+              title: sceneTitle,
+              overview: sceneOverview,
+              setting: sceneSetting,
+              openingNarration: sceneOpening,
+              tags: sceneTags,
+              created: rawScene?.created || Date.now(),
+              lastModified: Date.now()
+            };
+            thread.scene = finalScene;
+            newlyCreatedScenes.push(finalScene);
+
+            // If the scene has openingNarration and thread has no active narration message, inject it
+            if (sceneOpening) {
+              let hasNarrationMsg = importedMessages.some(m => m.threadId === thread.id && m.characterId === -2 && m.name === "Narrator" && m.message && m.message.trim() !== "." && m.message.trim() !== "");
+              if (!hasNarrationMsg) {
+                let charObj = existingCharacters.find(c => c.id === thread.characterId) || importedCharacters.find(c => c.id === thread.characterId);
+                let charName = charObj ? charObj.name : "Character";
+                let userName = thread.userCharacter?.name || "User";
+                let narrationText = sceneOpening.replaceAll("{{user}}", userName).replaceAll("{{char}}", charName);
+
+                maxMessageId++;
+                let newNarMsg = {
+                  id: maxMessageId,
+                  threadId: thread.id,
+                  message: narrationText,
+                  characterId: -2,
+                  name: "Narrator",
+                  creationTime: (thread.creationTime || Date.now()) + 1,
+                  hiddenFrom: [],
+                  expectsReply: false,
+                  variants: [null],
+                  memoryIdBatchesUsed: [],
+                  loreIdsUsed: [],
+                  summaryHashUsed: null,
+                  summariesUsed: [],
+                  summariesEndingHere: null,
+                  memoriesEndingHere: null,
+                  memoryQueriesUsed: [],
+                  messageIdsUsed: [],
+                  scene: null,
+                  avatar: {},
+                  customData: {},
+                  wrapperStyle: "",
+                  order: 1,
+                  instruction: "Opening narration",
+                  $types: { hiddenFrom: "arrayNonindexKeys", variants: "arrayNonindexKeys", memoryIdBatchesUsed: "arrayNonindexKeys", loreIdsUsed: "arrayNonindexKeys", summariesUsed: "arrayNonindexKeys", memoryQueriesUsed: "arrayNonindexKeys", messageIdsUsed: "arrayNonindexKeys" }
+                };
+                importedMessages.push(newNarMsg);
+              }
+            }
+          }
+        }
+      }
+
       // re-number memory ids
       if(importedMemories) {
         for(let memory of importedMemories) {
@@ -21545,6 +21620,28 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
         });
       }
 
+      // Save newly imported/created scenes to customScenes
+      if (newlyCreatedScenes && newlyCreatedScenes.length > 0) {
+        try {
+          let getFn = window.getScenes || (typeof getScenes !== "undefined" ? getScenes : null);
+          let saveFn = window.saveScenes || (typeof saveScenes !== "undefined" ? saveScenes : null);
+          let existingScenes = getFn ? await getFn() : [];
+          let modified = false;
+          for (let sc of newlyCreatedScenes) {
+            let already = existingScenes.find(s => s.id === sc.id || (s.title && s.title === sc.title && s.overview === sc.overview));
+            if (!already) {
+              existingScenes.push(sc);
+              modified = true;
+            }
+          }
+          if (modified && saveFn) {
+            await saveFn(existingScenes);
+          }
+        } catch(e) {
+          console.error("[Scenes] Error saving newly imported scenes:", e);
+        }
+      }
+
       // TODO: should probably update the lastMessageTime of each charactersThatWeAlreadyHave to be the time of their last message, since this could be wrong now 
 
     } catch(e) {
@@ -21567,6 +21664,10 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
     await renderCharacterList(); // <-- in case they're currently on the character screen
     await renderThreadList();
     console.log("Finished renderThreadList after import");
+    if(newlyCreatedScenes && newlyCreatedScenes.length > 0) {
+      let sc = newlyCreatedScenes[0];
+      if(window.showToast) window.showToast(`🎬 Created and attached scene: "${sc.title}".`);
+    }
     if(singleThreadImportId !== null) {
       await showThread(singleThreadImportId);
     }
