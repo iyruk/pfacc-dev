@@ -12,6 +12,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > been done — new sessions read it (via `AGENTS.md`) to understand project history
 > without needing git or chat history.
 
+## [0.6.6] - 2026-09-11
+
+### Changed
+
+- index.html: revamped the Scene Details editor in `window.openScenesManagerModal` with a sleek underline tabbed layout (Variant 2), placing Scene Title and Tags in a persistent header row above the tabs.
+- index.html: separated the 3 main scene textareas into dedicated tabs (Premise & Purpose, Starting Setting & Atmosphere, and Opening Narration) while keeping all panels present in the DOM to ensure smooth tab switching and zero data loss.
+- index.html: updated Tab 2 (Starting Setting & Atmosphere) and `getBotReply` AI instructions to explicitly designate the setting as the initial starting location and opening ambience, allowing characters and narrative events to naturally evolve and transition to new locations without rigid entrapment while retaining background context.
+
+## [0.6.5] - 2026-09-11
+
+### Added
+
+- index.html: added a Scenes & Scenarios system allowing users to create, customize, and manage story premises, settings, and opening narrations that gently guide chat direction and character responses without forcing rigid outcomes.
+- index.html: created `window.openScenesManagerModal` modal with search/filter, list of scenes with title/tag/preview cards, visual editor (Title, Tags, Premise & Purpose, Setting & Atmosphere, Opening Narration), Duplicate, Delete, JSON Export, JSON Import, and Reset to Starter Defaults.
+- index.html: built-in 3 rich starter scenes (*Cabin in the Woods*, *Rainy Cafe Reunion*, *Midnight Heist Briefing*) stored non-destructively in `db.misc` under `"customScenes"` with zero schema migrations.
+- index.html: added optional Scene / Scenario selector to the 1-on-1 chat creation popup card (`characterEl` click) and the Group Chat configuration modal (`showGroupChatModal`), defaulting to "None (Freestyle)" for zero friction.
+- index.html: added automatic thread naming (`${scene.title} — ${characterName}`) and initial Narrator opening message insertion when a thread is initialized with a scene.
+- index.html: added `window.openThreadSceneModal` allowing users to view, change, edit, or detach the active scene for any existing chat thread at any time.
+- index.html: added sidebar button `[icon("film")] scenes` in `#appOptions`, `[icon("film")] scene / scenario` in the thread ⋯ dropdown menu, and `[icon("film")] scene / scenario` in `#threadOptionsPopup`.
+- index.html: added `/scenes`, `/scene`, and `/scenario` slash commands to open the Scenes Manager or view the current thread's scene.
+- index.html: injected `ACTIVE SCENE & STORY PURPOSE (GUIDE, DO NOT FORCE)` into `getBotReply` AI instructions, providing narrative context, setting atmosphere, and organic direction while explicitly instructing the model not to force or rush the premise.
+
+## [0.6.4] - 2026-09-11
+
+### Fixed
+
+- index.html: fixed other characters speaking dialogue or having separate action paragraphs during someone else's reply (e.g. Jerry emerging and speaking while Ashley is the replying character) by adding comprehensive character name resolution across threads, messages, DB, and shortcuts (`getAllCharacterNamesInThread`).
+- index.html: added `isParagraphAttributedToOtherCharacter` and `filterAndPruneOtherCharacterContent` to detect and filter out leading paragraphs where another character acts or speaks before the replying character, and truncate trailing paragraphs when another character's turn begins.
+- index.html: added real-time stream stopping in `onChunk` as soon as a new paragraph begins describing actions or dialogue for another character.
+- index.html: reinforced `getBotReply` instructions and `createAiChatCompletion` system prompt with strict mandatory opening rules (must begin directly with the replying character's actions/words) and zero tolerance for quotes spoken by or action blocks dedicated to other characters.
+
+## [0.6.3] - 2026-09-11
+
+### Changed
+
+- index.html: redesigned the Shortcut Buttons Manager visual editor (`openBulkEditShortcutsModal`) into a compact, minimal, and collapsible layout to dramatically reduce vertical footprint and visual clutter.
+- index.html: added collapsibility to all shortcut cards with one-click header chevron/row toggling, compact single-line collapsed bars showing `#index`, live preview button pill, command snippet, and active badges (`⚡ auto`, `🧹 clear`, insertion type).
+- index.html: added "Collapse all" and "Expand all" toolbar controls to quickly toggle all cards simultaneously.
+- index.html: streamlined the expanded card fields with tightened padding, smaller inputs, side-by-side Button Label and Insertion Behavior, and compact checkboxes.
+- index.html: implemented ephemeral editor ID tracking (`_editorId`) ensuring collapse state and card order persist accurately during reordering (Move Up/Down), duplication, and deletion.
+
+## [0.6.2] - 2026-09-11
+
+### Fixed
+
+- index.html: fixed AI characters ventriloquizing, godmoding, and roleplaying multiple characters in a single message by adding strict anti-godmoding instructions and character perspective boundaries to `getBotReply` (`CRITICAL CHARACTER PERSPECTIVE & ANTI-GODMODING RULES`) and `createAiChatCompletion` system prompt.
+- index.html: updated prompt task instruction in `getBotReply` from generic multi-message writing (`write the next 3 messages in this chat`) to strictly scoped single-turn generation (`write ONLY the single next message in this chat as [[${replyingCharacterName}]]`), eliminating multi-character dialogue simulation.
+- index.html: added other thread character names to stop sequences (`\n\n${otherName}:`), stream-chunk early termination, and multi-paragraph post-processing truncation to automatically cut off any accidental continuation into other characters' turns.
+
+## [0.6.1] - 2026-09-11
+
+### Fixed
+
+- index.html: fixed incorrect character attribution and context confusion in multi-character chats where an AI reply written as "Sarah" was attributed to and displayed under "Jerry" by enhancing `characterList` resolution in `napAutoReply` to index all active thread participants, allowed loaded character IDs, and shortcut buttons instead of only buttons with ID hashes.
+- index.html: added robust `extractCharacterFromAiResponse` in `napDynamicResponder` to reliably parse character selections from alternative and Perchance AI models (handling prefixes like `Character: `, markdown bold/italics, quotes, and punctuation) so responder selections map directly to the intended character rather than erroneously falling back to the thread character.
+- index.html: updated dynamic responder context updating (`updateContextInfo`) to update the responding character's custom data rather than always updating the primary thread character.
+- index.html: reinforced `getBotReply` instructions with character-specific perspective directives (`isAnotherCharacterReplying`) when an external character replies, ensuring the LLM speaks strictly as that character.
+- index.html: eliminated leading colons (`: *She held...*`) across streaming and non-streaming responses by fixing premature delimiter flushing on `]]` in `createAiChatCompletion`, stripping bare leading colons in `stripLeadingSpeakerPrefix`, `computeFinalText`, `onStreamingReplyChunk`, `handleStreamingReplyChunk`, and final database assignment.
+
+## [0.6.0] - 2026-09-11
+
+### Added
+
+- index.html: added interactive Shortcuts Manager modal (`window.openBulkEditShortcutsModal`) under `#shortcutButtonsCtn` featuring tabbed navigation between an intuitive Visual Card Editor and an Advanced Raw Text editor with real-time bidirectional synchronization.
+- index.html: added individual shortcut cards with live-rendered button preview pills (resolving `{{char}}` and `{{user}}` in real-time), one-click Move Up (`▲`), Move Down (`▼`), Duplicate (`📋`), and Delete (`🗑️`) controls.
+- index.html: added quick shortcut preset toolbar buttons (`🗣️ /ai`, `🗣️ /user`, `🗣️ /nar`, `🖼️ /image`) and a blank shortcut generator with placeholder auto-focus.
+- index.html: added slash commands `/shortcuts` and `/shortcut` to open the Shortcuts Manager directly from the chat input box.
+- index.html: added persistent `+ shortcuts` trigger button when a thread has zero shortcuts so users are never locked out of adding shortcuts back after bulk deletions.
+
+### Changed
+
+- index.html: updated the bulk-edit shortcut button (`#shortcutButtonsCtn button:first-child`) to use FontAwesome pencil icon and connected the `📝 bulk edit / manage shortcuts` action directly to the new visual Shortcuts Manager modal.
+- index.html: improved shortcut text format serialization (`shortcutsToTextFormat` and `shortcutsFromTextFormat`) to safely escape and unescape newlines (`\n`) and provide automatic fallback names for untitled shortcuts.
+
+## [0.5.0] - 2026-09-11
+
+### Added
+
+- index.html: added thread-level Story Goal & pacing feature (`thread.storyGoal`, `thread.storyGoalPacing`) to guide narrative progression in long chat sessions towards an overarching objective with slow-burn guardrails preventing premature resolution.
+- index.html: injected pacing-governed story goal prompt into `getBotReply` instructions prior to `>>> TASK` with explicit progression guidelines (slow-burn organic stepping stones, ultra-slow strict non-resolution subtext, or moderate steady advancement).
+- index.html: added Thread Options popup button (`⚙️ thread options` -> `$.storyGoalButton`) with modal editor (`window.openStoryGoalModal`) allowing users to define the story goal and select pacing ('slow', 'ultra-slow', 'moderate').
+- index.html: added `/goal` slash command suite (`/goal` to open modal editor, `/goal clear` to remove goal, `/goal <text>` to set story goal directly) with helper documentation added to chat input tooltip.
+- index.html: added inline Story Goal banner above chat input (`#storyGoalBannerCtn`) displaying current goal preview, pacing pill, quick edit button (`[✎]`), and clear button (`[✖]`).
+- index.html: added `showInlineStoryGoal` toggle in Global Settings under the Appearance tab allowing users to show or hide the inline story goal banner.
+
+## [0.4.0] - 2026-09-02
+
+### Added
+
+- index.html: alternative AI provider support for text generation with default "perchance" (built-in, zero-configuration website AI) and full OpenAI-compatible API support (`window.pfaccAiProvider`), including presets for OpenRouter, OpenAI, Grok (xAI), DeepSeek, Ollama (local), LM Studio (local), and Custom endpoints.
+- index.html: searchable model input with native `<datalist>` auto-completion, dynamic search filter dropdown (`window.__updateModelSearchDropdown`, `window.__selectAiModel`), and `Fetch Models` button (`window.__fetchAiModels`) that queries the provider's `GET /models` endpoint with CORS-safe proxy fallback via `root.superFetch`.
+- index.html: global persistence for AI provider configuration (provider, baseUrl, apiKey, model, temperature, maxTokens, maxContextTokens) stored in `db.misc` and `localStorage`, ensuring settings apply globally across all stories and characters rather than per-thread.
+- index.html: dynamic provider indicator icon on the send button (`#sendButtonProviderIcon` via `updateSendButtonProviderIcon`) displaying a vibrant green leaf for free Perchance (`AI Provider: Perchance (Free)`) or a distinct icon (amber bolt for cloud/remote APIs, blue server for local Ollama/LM Studio models) with model details tooltip for alternative providers.
+
+### Changed
+
+- index.html: redesigned Global Settings modal to match the Character Editor layout with an 820px-wide card, user dossier header (avatar thumbnail, nickname, description), and tabbed navigation (`.settingsTabs button` with FontAwesome icons via `window.__setSettingsTab`): **Profile**, **AI Provider**, **Chat & Prompts**, **Appearance**, **Memory & Lore**, and **Advanced**.
+- index.html: wrapped `root.aiTextPlugin` to seamlessly route all text generation calls across the application (chat streaming replies, context info generation, thread titles, summarization, character creation, and URL extraction) to the active AI provider while strictly keeping image generation on Perchance (`textToImagePlugin`).
+
+### Fixed
+
+- index.html: safeguarded `prompt2`'s initial focus query so hidden inputs (`input[type=hidden]`) are excluded from receiving focus and `selectionStart` errors are trapped, preventing `InvalidStateError: The input element's type ('hidden') does not support selection`.
+- index.html: guarded `updateInputVisibilies` against undefined specs so any element with a custom `data-spec-key` safely checks `specs[key]?.show` instead of throwing `Cannot read properties of undefined (reading 'show')`.
+- index.html: mapped `pfaccModel` directly in `specs` and replaced the character-like avatar circle in the Global Settings header with a dedicated settings cog banner to eliminate visual confusion with the Character Editor.
+- index.html: fixed element selectors in `window.__fetchAiModels`, `window.__updateModelSearchDropdown`, and `window.__selectAiModel` to query `input[data-spec-key]` directly instead of the parent `<section>`, preventing `TypeError: Cannot read properties of undefined (reading 'trim')` when reading base URL and API key values.
+- index.html: fixed prompt construction in `createAiChatCompletion` so `startWith` (recent messages and character reply prefix) is combined into the prompt rather than passed as an assistant turn, preventing OpenAI-compatible models from assuming the assistant already replied and generating the next character or user turn, and added initial speaker-prefix filtering (handling colon-less bracketed tags e.g. `[[Chloe]]\n` and `[[Chloe]]:`) with real-time stop sequence truncation.
+- index.html: enabled auto-reply for AI-assisted user messages by removing hardcoded `expectsReply: false` from `/user` command invocations, allowing `napAutoReply` and `doBotReplyIfNeeded` to naturally trigger character auto-replies after AI-assisted user turns.
+
 ## [0.3.0] - 2026-08-21
 
 ### Changed
