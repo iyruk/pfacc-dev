@@ -3577,7 +3577,7 @@ notes to self:
       <div style="display:flex;">
         <button id="settingsButton" class="appOptionButton">[icon("cog")] settings</button> 
         <button id="scenesManagerButton" class="appOptionButton" style="margin-left: 0.5rem;" title="Manage story scenes & scenarios">[icon("film")] scenes</button> 
-        <button id="tipsButton" class="appOptionButton" style="margin-left: 0.5rem; max-width:max-content; padding:0 0.5rem;" onclick="window.open('https://onedrive.live.com/redir?resid=124075AFFBE14CF1!713828&authkey=!AJ3EsWKw6cAt82A&page=View&wd=target(Guides%2F1%20-%20Basics.one%7C608643fc-33e7-41e3-a3cc-26914f57cadc%2F1.1%20-%20Overview%7C80be29db-6e2b-4614-b215-f2945f83fea2%2F)&wdorigin=NavigationUrl')">[icon("circle-info")] tips</button>        
+        <button id="infoButton" class="appOptionButton" style="margin-left: 0.5rem; max-width:max-content; padding:0 0.5rem;" title="About, Resources & Changelog">[icon("circle-info")] info</button>        
         <button id="toggleReadingModeButton" onclick="toggleReadingMode()" class="appOptionButton" style="margin-left:0.5rem; width:min-content;padding:0.2rem;" title="Reading Mode">[icon("book-open")]</button> 
         <!-- <button class="appOptionButton" style="margin-left: 0.5rem; max-width:max-content; padding:0 0.5rem;">[fullscreenButtonPlugin("⇱", "⇲", "background:transparent; border:none; color:inherit; width:min-content; height:100%;")]</button> -->
       </div>
@@ -3747,22 +3747,6 @@ notes to self:
       
       <br><br>
       <p id="storageNoticeEl" style="text-align:left; font-size:70%; opacity:0.8; padding:0.4rem; border:1px solid var(--border-color); border-radius:3px; max-width:500px; margin:0 auto; background:var(--box-color);"></p>
-      
-      <div id="introVideoCtn" style="text-align:center; padding:0.4rem; border:1px solid var(--border-color); border-radius:3px; max-width:max-content; margin:0 auto; background:var(--box-color); margin-top:2rem;">
-        <div style="margin-bottom:0.25rem; font-size:70%; opacity:0.7; text-align:center;">I found this helpful intro video by <a href="https://www.youtube.com/watch?v=V8R1P6jM1es" target="_blank">CrossLax on YouTube</a>:</div>
-        <div id="introVideoIframeWrapperEl"></div>
-        <div style="text-align:center;"><button onclick="localStorage.seenIntroVideo='1'; introVideoCtn.remove();">hide</button></div>
-      </div>
-      <script>
-        if(localStorage.seenIntroVideo) {
-          introVideoCtn.remove();
-        } else {
-          introVideoIframeWrapperEl.innerHTML = `<iframe style="max-width:100%; aspect-ratio:336/189;" width="336" height="189" src="https://www.youtube-nocookie.com/embed/V8R1P6jM1es?si=yu1HV7DbKKNlHKLI&amp;hd=1&amp;start=158" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
-        }
-      </script>
-      
-      <p style="text-align: center;font-size: 80%;opacity: 0.8; padding:0 0.5rem; margin-bottom:0.25rem; margin-top:1rem;">This chat app thing is powered by the <a href="/ai-text-plugin" target="_blank">ai-text-plugin</a> and the <a href="/text-to-image-plugin" target="_blank">text-to-image-plugin</a>.</p>
-      <p style="text-align: center;font-size: 80%;opacity: 0.8; padding:0 0.5rem; margin-bottom:0.25rem; margin-top:0;">For a simpler interface, try <a href="https://perchance.org/ai-chat" target="_blank">/ai-chat</a>.</p>
       <br><br>
     </div> 
     <div id="characterSearch" class="middleColumnScreen" style="flex-grow:1; display:none; overflow: auto;">
@@ -6152,6 +6136,420 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
   $.googleSyncButton?.addEventListener("click", () => {
     if (typeof window.openGoogleDriveSyncModal === "function") {
       window.openGoogleDriveSyncModal();
+    }
+  });
+
+  let markedLoadPromise = null;
+  function ensureMarkedLoaded() {
+    if (window.marked && typeof window.marked.parse === "function") return Promise.resolve(window.marked);
+    if (markedLoadPromise) return markedLoadPromise;
+    markedLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/marked/marked.min.js";
+      script.async = true;
+      script.onload = () => resolve(window.marked);
+      script.onerror = () => {
+        markedLoadPromise = null;
+        reject(new Error("Failed to load markdown parser."));
+      };
+      document.head.appendChild(script);
+    });
+    return markedLoadPromise;
+  }
+
+  window.openInfoModal = async function() {
+    let rootEl = document.createElement("div");
+    rootEl.className = "infoModalRoot";
+    rootEl.style.cssText = "display:flex; flex-direction:column; color:var(--text-color); font-size:0.88rem; width:100%; font-family:inherit;";
+
+    // Header (No version badge)
+    let headerEl = document.createElement("div");
+    headerEl.style.cssText = "padding-bottom:0.6rem; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:0.55rem;";
+    headerEl.innerHTML = `
+      <span style="display:inline-flex; align-items:center; color:var(--accent, #9d65c9); font-size:1.15rem;">${faIcon("circle-info") || "ℹ️"}</span>
+      <span style="font-size:1.1rem; font-weight:700;">Perchance AI Character Chat</span>
+    `;
+    rootEl.appendChild(headerEl);
+
+    // Style A Navigation Tabs (Sliding Underline, pfstory-dev pattern)
+    let navEl = document.createElement("div");
+    navEl.className = "infoModalTabs";
+    navEl.style.cssText = "display:flex; border-bottom:1px solid var(--border-color); gap:0.25rem; margin-top:0.35rem;";
+    navEl.innerHTML = `
+      <button type="button" class="infoTabBtn active" data-tab="about" style="position:relative; background:none; border:none; padding:0.65rem 0.95rem; font-size:0.86rem; font-weight:600; color:var(--accent, #9d65c9); cursor:pointer; display:flex; align-items:center; gap:0.35rem; font-family:inherit;">
+        ${faIcon("circle-info") || ""} About
+        <span class="infoTabUnderline" style="position:absolute; bottom:-1px; left:0; right:0; height:2px; background:var(--accent, #9d65c9); border-radius:2px 2px 0 0; transform:scaleX(1); transition:transform 0.2s ease;"></span>
+      </button>
+      <button type="button" class="infoTabBtn" data-tab="resources" style="position:relative; background:none; border:none; padding:0.65rem 0.95rem; font-size:0.86rem; font-weight:600; color:var(--text-color); opacity:0.75; cursor:pointer; display:flex; align-items:center; gap:0.35rem; font-family:inherit;">
+        ${faIcon("book") || ""} Resources
+        <span class="infoTabUnderline" style="position:absolute; bottom:-1px; left:0; right:0; height:2px; background:var(--accent, #9d65c9); border-radius:2px 2px 0 0; transform:scaleX(0); transition:transform 0.2s ease;"></span>
+      </button>
+      <button type="button" class="infoTabBtn" data-tab="changelog" style="position:relative; background:none; border:none; padding:0.65rem 0.95rem; font-size:0.86rem; font-weight:600; color:var(--text-color); opacity:0.75; cursor:pointer; display:flex; align-items:center; gap:0.35rem; font-family:inherit;">
+        ${faIcon("clock-rotate-left") || ""} Changelog
+        <span class="infoTabUnderline" style="position:absolute; bottom:-1px; left:0; right:0; height:2px; background:var(--accent, #9d65c9); border-radius:2px 2px 0 0; transform:scaleX(0); transition:transform 0.2s ease;"></span>
+      </button>
+    `;
+    rootEl.appendChild(navEl);
+
+    // Tab Panels Container
+    let panelsCtn = document.createElement("div");
+    panelsCtn.className = "infoModalPanels";
+    panelsCtn.style.cssText = "padding:0.9rem 0.2rem 0.4rem; max-height:58vh; overflow-y:auto; line-height:1.5;";
+    rootEl.appendChild(panelsCtn);
+
+        // 1. ABOUT PANEL
+    let aboutPanel = document.createElement("div");
+    aboutPanel.id = "infoPanel-about";
+    aboutPanel.className = "infoPanel";
+    aboutPanel.style.display = "block";
+    aboutPanel.innerHTML = `
+      <p style="margin:0 0 0.85rem; font-size:0.84rem; opacity:0.85; line-height:1.45;">
+        Created & maintained by <b>@iyruk</b>. Enhanced fork of Perchance's <em>ai-character-chat</em> with an improved & modernized UI, overhauled character database, dynamic character spawning, multi-character orchestration, scenes, custom AI engines, and cloud sync.
+      </p>
+
+      <div style="font-size:0.75rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent, #9d65c9); margin:0.8rem 0 0.45rem;">
+        Key Features & Enhancements
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.55rem;">
+        <div style="background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.6rem 0.75rem;">
+          <div style="font-weight:600; font-size:0.85rem; margin-bottom:0.15rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("palette") || "🎨"} Improved & Modernized UI
+          </div>
+          <div style="font-size:0.78rem; opacity:0.85; line-height:1.4;">
+            Refined responsive layout, customizable color themes, reading mode, streamlined tabbed settings & managers, in-feed context info pills, and accessible UI controls.
+          </div>
+        </div>
+
+        <div style="background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.6rem 0.75rem;">
+          <div style="font-weight:600; font-size:0.85rem; margin-bottom:0.15rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("folder-tree") || "📁"} Character Database & Folder Organization
+          </div>
+          <div style="font-size:0.78rem; opacity:0.85; line-height:1.4;">
+            Complete character library overhaul with responsive card grid or compact list view, collapsible folder tree sidebar with nesting & emoji support, instant search across names/roles/tags, flexible sorting, and a unified 6-tab Character Editor dossier.
+          </div>
+        </div>
+
+        <div style="background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.6rem 0.75rem;">
+          <div style="font-weight:600; font-size:0.85rem; margin-bottom:0.15rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("user-plus") || "✨"} Spawn Character Engine (<code>/spawn</code>)
+          </div>
+          <div style="font-size:0.78rem; opacity:0.85; line-height:1.4;">
+            Seamlessly spawn brand new characters into active chats on the fly with the <code>/spawn</code> command or toolbar button, featuring configurable search depth, persona generation (Mind/Mannerisms/Drive), and organic dialogue introduction.
+          </div>
+        </div>
+
+        <div style="background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.6rem 0.75rem;">
+          <div style="font-weight:600; font-size:0.85rem; margin-bottom:0.15rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("users") || "🎭"} Multi-Character Orchestration
+          </div>
+          <div style="font-size:0.78rem; opacity:0.85; line-height:1.4;">
+            Engage multiple characters simultaneously in single threads. The engine dynamically selects responders based on conversation context, with strict character perspective boundaries to prevent ventriloquizing or godmoding.
+          </div>
+        </div>
+
+        <div style="background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.6rem 0.75rem;">
+          <div style="font-weight:600; font-size:0.85rem; margin-bottom:0.15rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("film") || "🎬"} Scenes & Scenarios Manager
+          </div>
+          <div style="font-size:0.78rem; opacity:0.85; line-height:1.4;">
+            Organize story environments with starting locations, automatic scene evolution, and custom scenario prompts tailored per roleplay.
+          </div>
+        </div>
+
+        <div style="background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.6rem 0.75rem;">
+          <div style="font-weight:600; font-size:0.85rem; margin-bottom:0.15rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("clipboard-check") || "🧠"} Context Info & Live Status Tracking
+          </div>
+          <div style="font-size:0.78rem; opacity:0.85; line-height:1.4;">
+            Automated updates for character status, location, inventory, and stats after each message. Toggle easily via top feed pills or <code>/ci</code> slash commands.
+          </div>
+        </div>
+
+        <div style="background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.6rem 0.75rem;">
+          <div style="font-weight:600; font-size:0.85rem; margin-bottom:0.15rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("microchip") || "⚡"} Multi-Provider AI Engine
+          </div>
+          <div style="font-size:0.78rem; opacity:0.85; line-height:1.4;">
+            Direct integration with Nano-GPT, OpenRouter, Groq, DeepSeek, local Ollama / LM Studio, and Perchance AI with in-chat Quick Model Switcher and favorites bookmarking.
+          </div>
+        </div>
+
+        <div style="background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.6rem 0.75rem;">
+          <div style="font-weight:600; font-size:0.85rem; margin-bottom:0.15rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("cloud") || "☁️"} Google Drive AppData Cloud Sync
+          </div>
+          <div style="font-size:0.78rem; opacity:0.85; line-height:1.4;">
+            Seamless cross-device backup and restore into your personal private Google Drive with collision safeguards, timestamp checks, and automated background sync schedules.
+          </div>
+        </div>
+      </div>
+
+      <div style="font-size:0.75rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent, #9d65c9); margin:0.9rem 0 0.4rem;">
+        Community & Feedback
+      </div>
+      <div style="font-size:0.8rem; opacity:0.85; line-height:1.4;">
+        Have questions, run into issues, or want to share feedback? Visit the discussion thread in the Perchance Discord: 
+        <a href="https://discord.com/channels/970057744612724746/1548551714741817364" target="_blank" style="color:var(--link-color); font-weight:600;">Link to Discord Thread ↗</a>
+      </div>
+    `;
+    panelsCtn.appendChild(aboutPanel);
+
+    // 2. RESOURCES PANEL
+    let resPanel = document.createElement("div");
+    resPanel.id = "infoPanel-resources";
+    resPanel.className = "infoPanel";
+    resPanel.style.display = "none";
+    resPanel.innerHTML = `
+      <div style="font-size:0.75rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent, #9d65c9); margin-bottom:0.45rem;">
+        User Guides & Video
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.5rem;">
+        <a href="https://onedrive.live.com/redir?resid=124075AFFBE14CF1!713828&authkey=!AJ3EsWKw6cAt82A&page=View&wd=target(Guides%2F1%20-%20Basics.one%7C608643fc-33e7-41e3-a3cc-26914f57cadc%2F1.1%20-%20Overview%7C80be29db-6e2b-4614-b215-f2945f83fea2%2F)&wdorigin=NavigationUrl" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("book-open") || "📖"} Comprehensive Character Chat Guide
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Official OneNote guide covering basics, multi-character setups, prompting techniques, and advanced mechanics.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Guide ↗</span>
+        </a>
+
+        <a href="https://perchance.org/ai-character-chat-docs#tips" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("circle-question") || "❓"} Official Character Chat Docs & Tips
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Perchance official character chat documentation, tips, prompting syntax, and core features.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Docs ↗</span>
+        </a>
+
+        <a href="https://docs.google.com/document/d/1z-L-M5PpHuI3Nz7R_mWOuwr0w_ElTxgzzqsYJND65Fs/preview" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("file-lines") || "📄"} Community Character Chat Guide
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              In-depth Google Doc guide covering character formatting, definitions, logic, and advanced roleplay tips.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Doc ↗</span>
+        </a>
+
+        <a href="https://www.youtube.com/watch?v=V8R1P6jM1es" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("video") || "▶️"} Intro Video Tutorial (by CrossLax)
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Helpful YouTube video walkthrough demonstrating character creation, chat mechanics, and getting started.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Video ↗</span>
+        </a>
+
+        <a href="https://rentry.org/uerop" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("keyboard") || "⌨️"} Shortcuts & Commands Cheat Sheet
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Handy slash commands, prompt engineering shortcuts, and message formatting tips.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Rentry ↗</span>
+        </a>
+      </div>
+
+      <div style="font-size:0.75rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent, #9d65c9); margin:0.9rem 0 0.45rem;">
+        Companion Perchance Generators
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.5rem;">
+        <a href="https://perchance.org/pfstory" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("book-bookmark") || "📖"} pfstory — Story & Roleplay Generator
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Alternative interactive roleplay and story generator with story bible, auto-updating tracker, and custom mechanics.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Generator ↗</span>
+        </a>
+
+        <a href="https://perchance.org/ai-character-description" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("id-card") || "📝"} AI Character Description
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Flesh out compelling backstories, physical traits, and personalities for your characters.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Tool ↗</span>
+        </a>
+
+        <a href="https://perchance.org/ai-text-to-image-generator" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("image") || "🎨"} AI Text-to-Image Generator
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Generate custom avatars, character portraits, and scenic backgrounds.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Tool ↗</span>
+        </a>
+
+        <a href="https://perchance.org/ai-story-outline" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("pen-nib") || "📜"} AI Story Outline & Plot Generator
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Brainstorm plot arcs, narrative twists, and world-building ideas for your roleplays.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Tool ↗</span>
+        </a>
+
+        <a href="/ai-rpg" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("dice-d20") || "🎲"} AI RPG
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Explore deep interactive roleplays and adventures inside your worlds.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Tool ↗</span>
+        </a>
+
+        <a href="https://perchance.org/ai-chat" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("comments") || "💬"} Perchance /ai-chat
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              A minimal, lightweight chat interface for simple one-on-one AI conversations.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">App ↗</span>
+        </a>
+      </div>
+
+      <div style="font-size:0.75rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--accent, #9d65c9); margin:0.9rem 0 0.45rem;">
+        Underlying Perchance Plugins
+      </div>
+      <div style="display:flex; flex-direction:column; gap:0.5rem;">
+        <a href="https://perchance.org/ai-text-plugin" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("code") || "⚙️"} ai-text-plugin
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Official Perchance AI text completion plugin powering responses, character dialogue, and summarization.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Plugin ↗</span>
+        </a>
+
+        <a href="https://perchance.org/text-to-image-plugin" target="_blank" style="display:flex; justify-content:space-between; align-items:center; background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm, 4px); padding:0.65rem 0.8rem; text-decoration:none; color:inherit;">
+          <div>
+            <div style="font-weight:600; font-size:0.85rem; color:var(--link-color); display:flex; align-items:center; gap:0.35rem;">
+              ${faIcon("wand-magic-sparkles") || "✨"} text-to-image-plugin
+            </div>
+            <div style="font-size:0.75rem; opacity:0.8; margin-top:0.15rem;">
+              Official Perchance image generation plugin powering character avatars, scene backgrounds, and illustrations.
+            </div>
+          </div>
+          <span style="font-size:0.7rem; padding:0.15rem 0.45rem; border-radius:3px; background:var(--button-bg); opacity:0.8; white-space:nowrap; margin-left:0.5rem;">Plugin ↗</span>
+        </a>
+      </div>
+    `;
+    panelsCtn.appendChild(resPanel);
+
+// 3. CHANGELOG PANEL
+    let changelogPanel = document.createElement("div");
+    changelogPanel.id = "infoPanel-changelog";
+    changelogPanel.className = "infoPanel";
+    changelogPanel.style.display = "none";
+    changelogPanel.innerHTML = `
+      <div id="infoModalChangelogContent" style="font-size:0.82rem; line-height:1.45;">
+        <div style="opacity:0.7; font-style:italic; padding:0.5rem 0;">Loading release notes from repository...</div>
+      </div>
+    `;
+    panelsCtn.appendChild(changelogPanel);
+
+    // Tab button switching
+    const tabBtns = navEl.querySelectorAll(".infoTabBtn");
+    const panels = panelsCtn.querySelectorAll(".infoPanel");
+
+    let changelogLoaded = false;
+    async function loadChangelogContent() {
+      if (changelogLoaded) return;
+      const ctn = rootEl.querySelector("#infoModalChangelogContent");
+      if (!ctn) return;
+
+      try {
+        await ensureMarkedLoaded();
+        const res = await fetch("https://raw.githubusercontent.com/iyruk/pfacc-dev/main/CHANGELOG.md");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const md = await res.text();
+        ctn.innerHTML = marked.parse(md);
+        changelogLoaded = true;
+      } catch(err) {
+        console.warn("[Info Modal] Could not fetch remote changelog:", err);
+        const fallbackMd = `# Changelog Highlights\n\n## [0.7.1] - 2026-09-12\n### Added\n- **index.html**: Google Drive sync conflict handling, collision warning shield, and characters/chats/messages counts display.\n- **index.html**: Automated backup safety pause when newer cloud data is detected.\n- **index.html**: Google Drive session persistence in \`localStorage\` with silent background token renewal.\n\n## [0.7.0] - 2026-09-12\n### Added\n- **index.html**: Google Drive AppData Cloud Sync with automatic backup scheduling.\n\n## [0.6.9] - 2026-09-12\n### Added\n- **index.html**: AI Model favoriting, recent models tracking, and in-chat Context Info toggling (\`/ci\`).\n\n## [0.6.8] - 2026-09-12\n### Added\n- **index.html**: Nano-GPT provider preset, model context length badges, and Quick Model Switcher dialog.`;
+        if (window.marked && typeof window.marked.parse === "function") {
+          ctn.innerHTML = marked.parse(fallbackMd);
+        } else {
+          ctn.innerHTML = `<div style="white-space:pre-wrap; font-family:inherit; font-size:0.8rem; line-height:1.45;">${fallbackMd}</div>`;
+        }
+      }
+    }
+
+    tabBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        const targetTab = btn.getAttribute("data-tab");
+        tabBtns.forEach(b => {
+          const isCur = b === btn;
+          b.classList.toggle("active", isCur);
+          b.style.color = isCur ? "var(--accent, #9d65c9)" : "var(--text-color)";
+          b.style.opacity = isCur ? "1" : "0.75";
+          const underline = b.querySelector(".infoTabUnderline");
+          if (underline) underline.style.transform = isCur ? "scaleX(1)" : "scaleX(0)";
+        });
+
+        panels.forEach(p => {
+          p.style.display = p.id === `infoPanel-${targetTab}` ? "block" : "none";
+        });
+
+        if (targetTab === "changelog") {
+          loadChangelogContent();
+        }
+      });
+    });
+
+    await prompt2({
+      infoModalContent: {
+        type: "none",
+        html: rootEl
+      }
+    }, {
+      width: "600px",
+      submitButtonText: false,
+      cancelButtonText: "Close"
+    });
+  };
+
+  $.infoButton?.addEventListener("click", () => {
+    if (typeof window.openInfoModal === "function") {
+      window.openInfoModal();
     }
   });
 

@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > been done — new sessions read it (via `AGENTS.md`) to understand project history
 > without needing git or chat history.
 
+## [0.8.0] - 2026-09-12
+
+### Added
+
+- index.html: added `window.openInfoModal` tabbed dialog with three dedicated tabs: About (project byline, improved & modernized UI, feature cards for character database overhaul, spawn character engine, multi-character orchestration, scenes, context info, multi-provider AI, and cloud sync, with updated Discord community thread link), Resources (comprehensive OneDrive user guide, official character chat docs/tips, community Google Doc guide, CrossLax intro video tutorial, Rentry commands cheat sheet, pfstory companion generator, companion Perchance tools, minimal /ai-chat, and underlying engine plugins), and Changelog (live rendered repository markdown with offline fallback).
+- index.html: added dynamic markdown parser loader (`ensureMarkedLoaded`) to lazily fetch and load `marked.js` on-demand for rendering release notes without increasing initial page load footprint.
+- index.html: added `#infoButton` (`[icon("circle-info")] info`) to `#appOptions` toolbar replacing the legacy external tips button.
+
+### Removed
+
+- index.html: removed legacy `#tipsButton` direct link to external OneDrive in favor of the integrated Info modal.
+- index.html: removed the legacy embedded intro video container (`#introVideoCtn`) and bottom plugin footer text from the character selection screen in favor of the integrated Info modal Resources tab.
+
+
 ## [0.7.1] - 2026-09-12
 
 ### Added
