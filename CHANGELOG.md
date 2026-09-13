@@ -12,6 +12,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > been done — new sessions read it (via `AGENTS.md`) to understand project history
 > without needing git or chat history.
 
+## [0.7.1] - 2026-09-12
+
+### Added
+
+- index.html: added conflict detection in Google Drive Cloud Sync dashboard comparing cloud modification/export timestamp against local browser sync timestamp, displaying warning badges and an advisory alert box when cloud data is newer.
+- index.html: added characters, chats, and messages counts display for the Google Drive backup card in the Cloud Sync modal by storing counts in Drive file `appProperties` and `description` metadata (with automatic single-read backfill for legacy backups).
+- index.html: added conflict warning confirmation prompt to "Upload to Google Drive" button when the cloud backup is newer than local data to prevent accidental overwrites.
+- index.html: added automated backup safety conflict pause (`checkAndRunAutoBackup`): when scheduled auto-backup detects a newer cloud backup (or initial cloud backup on an unsynced browser), it automatically switches schedule to manual, updates UI badges, logs a warning, and fires a toast notification with a direct shortcut to review Cloud Sync.
+- index.html: added Google Drive authentication session persistence to `localStorage` (`pfacc-gdrive-access-token`, `pfacc-gdrive-token-expires`, `pfacc-gdrive-user-info`) allowing users to stay signed in across browser reloads without re-authenticating, paired with silent token renewal (`prompt: "none"`) during background automated backups and modal opens.
+
+## [0.7.0] - 2026-09-12
+
+### Added
+
+- index.html: added Google Drive AppData Cloud Sync (`window.openGoogleDriveSyncModal`, `requestGoogleDriveToken`, `gdriveUploadSyncFile`, `gdriveDownloadSyncFile`) allowing cross-browser backup and restore of characters, chats, lore, and settings without requiring a backend server.
+- index.html: added `#googleSyncButton` (`[icon("cloud")] sync`) to `#appOptions` alongside export/import buttons.
+- index.html: added "Cloud Sync" shortcut tab button to Global Settings dialog.
+- index.html: added automated cloud backup scheduling options (Manual, On change with 2-min idle debounce, every 15m, 30m, 1h, 2h, 6h, 12h, 24h) with local database fingerprinting to avoid duplicate API uploads when no data has changed.
+- index.html: streamlined Google Drive sync modal by removing raw Client ID configuration UI in favor of built-in OAuth credentials.
+- index.html: implemented snapshot upload with metadata packaging and two restore modes (complete replacement for new browsers or non-destructive merging with existing data) leveraging `tryImportingDexieFile`.
+
+## [0.6.9] - 2026-09-12
+
+### Added
+
+- index.html: added AI model favoriting system (`getFavoriteAiModels`, `toggleFavoriteAiModel`, `isFavoriteAiModelSync`) persisted to `localStorage` (`pfacc-favorite-models`) and `db.misc["pfaccFavoriteModels"]`.
+- index.html: added one-click remove action (`removeRecentAiModel`) to recent AI model chips across Global Settings and the Quick Model Switcher modal.
+- index.html: added "Favorite Models" section with interactive chips and direct star toggle (`★` / `☆`) to both Global Settings (AI tab) and the Quick Model Switcher dialog.
+- index.html: added row-level favorite star buttons directly in the Quick Model Switcher search/filter list to bookmark models without switching active models.
+- index.html: added quick toggle buttons for basic context info (`#toggleContextInfoButton`) and detailed context info (`#toggleDetailedContextInfoButton`) inside `#threadOptionsPopup` with live status indicators (`𝗼𝗻` / `𝗼𝗳𝗳`).
+- index.html: added inline toggle pills (`.ciBarToggleBasic`, `.ciBarToggleDetailed`) inside the sticky top `#messageFeedTopContextInfo` bar allowing immediate status toggling from within the message feed.
+- index.html: added `/ci` and `/contextinfo` slash commands with optional arguments (e.g. `/ci`, `/ci on`, `/ci off`, `/ci detailed`, `/ci detailed on`, `/ci detailed off`) to quickly toggle context info generation from the message input.
+- index.html: added `/ci (or /ci detailed)` entry to `messageInput` title tooltip command list without square brackets to avoid Perchance template expression evaluation.
+
+## [0.6.8] - 2026-09-12
+
+### Added
+
+- index.html: added Nano-GPT (`nanogpt`) preset to AI Provider configuration in Global Settings with base URL `https://nano-gpt.com/api/v1`, default model `openai/gpt-4o-mini`, and detailed model fetching support (`?detailed=true`).
+- index.html: added recently used AI models tracking (`getRecentAiModels`, `recordRecentAiModel`) persisted to `localStorage` and `db.misc`, displayed as quick-select pill chips in Global Settings and the Quick Model Switcher.
+- index.html: added rich model metadata parsing and caching (`context_length`, release/creation date, description) from provider model endpoints with formatted hover tooltips, context token badges (e.g. `128k ctx`), and release date tags.
+- index.html: added in-chat active model button (`#threadCurrentModelButton`) inside `#threadOptionsPopup` (visible when using custom/external AI providers) displaying current model name with microchip icon and metadata tooltip.
+- index.html: added in-chat Quick Model Switcher modal (`window.openQuickModelSwitcherModal`) allowing instant model search, real-time filtering, one-click recently used chips, detailed metadata inspection, live model re-fetching, and custom model input without leaving the chat thread.
+
 ## [0.6.7] - 2026-09-11
 
 ### Added

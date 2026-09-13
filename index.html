@@ -600,6 +600,7 @@ notes to self:
     openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1", defaultModel: "gpt-4o-mini", requiresApiKey: true },
     grok: { label: "Grok (xAI)", baseUrl: "https://api.x.ai/v1", defaultModel: "grok-2-latest", requiresApiKey: true },
     deepseek: { label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", defaultModel: "deepseek-chat", requiresApiKey: true },
+    nanogpt: { label: "Nano-GPT", baseUrl: "https://nano-gpt.com/api/v1", defaultModel: "openai/gpt-4o-mini", requiresApiKey: true },
     ollama: { label: "Ollama (local)", baseUrl: "http://localhost:11434/v1", defaultModel: "llama3.1", requiresApiKey: false },
     lmstudio: { label: "LM Studio (local)", baseUrl: "http://localhost:1234/v1", defaultModel: "local-model", requiresApiKey: false },
     custom: { label: "Custom (OpenAI-compatible)", baseUrl: "", defaultModel: "", requiresApiKey: false },
@@ -617,6 +618,232 @@ notes to self:
 
   const AI_CONFIG_KEYS = ["provider", "baseUrl", "apiKey", "model", "temperature", "maxTokens", "maxContextTokens"];
   const AI_LS_KEY = "pfacc-ai-config";
+  const RECENT_MODELS_LS_KEY = "pfacc-recent-models";
+  const FAVORITE_MODELS_LS_KEY = "pfacc-favorite-models";
+  const MODELS_METADATA_LS_KEY = "pfacc-models-metadata";
+
+  function readRecentModelsLocalStorage() {
+    try {
+      const raw = localStorage.getItem(RECENT_MODELS_LS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
+  }
+
+  function readFavoriteModelsLocalStorage() {
+    try {
+      const raw = localStorage.getItem(FAVORITE_MODELS_LS_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
+  }
+
+  window.__cachedFavoriteModels = readFavoriteModelsLocalStorage();
+
+  async function getFavoriteAiModels() {
+    try {
+      if (window.db && window.db.misc) {
+        const row = await window.db.misc.get("pfaccFavoriteModels");
+        if (row && Array.isArray(row.value)) {
+          window.__cachedFavoriteModels = row.value;
+          return row.value;
+        }
+      }
+    } catch (e) {}
+    const list = readFavoriteModelsLocalStorage();
+    window.__cachedFavoriteModels = list;
+    return list;
+  }
+
+  function isFavoriteAiModelSync(modelName) {
+    if (!modelName || typeof modelName !== "string") return false;
+    const trimmed = modelName.trim().toLowerCase();
+    const list = window.__cachedFavoriteModels || [];
+    return list.some(item => {
+      const m = typeof item === "string" ? item : item?.model;
+      return m && m.toLowerCase() === trimmed;
+    });
+  }
+
+  async function toggleFavoriteAiModel(modelName, provider) {
+    if (!modelName || typeof modelName !== "string") return false;
+    const trimmed = modelName.trim();
+    if (!trimmed) return false;
+    try {
+      let list = await getFavoriteAiModels();
+      const idx = list.findIndex(item => {
+        const m = typeof item === "string" ? item : item?.model;
+        return m && m.toLowerCase() === trimmed.toLowerCase();
+      });
+      let nowFav = false;
+      if (idx >= 0) {
+        list.splice(idx, 1);
+        nowFav = false;
+      } else {
+        list.unshift({
+          model: trimmed,
+          provider: provider || (window.pfaccAiProvider ? window.pfaccAiProvider.getConfigSync().provider : "custom"),
+          timestamp: Date.now()
+        });
+        nowFav = true;
+      }
+      window.__cachedFavoriteModels = list;
+      try {
+        localStorage.setItem(FAVORITE_MODELS_LS_KEY, JSON.stringify(list));
+      } catch (e) {}
+      if (window.db && window.db.misc) {
+        await window.db.misc.put({ key: "pfaccFavoriteModels", value: list });
+      }
+      if (window.showToast) {
+        window.showToast(nowFav ? `★ Added to favorites: ${trimmed}` : `Removed from favorites: ${trimmed}`, { type: "info" });
+      }
+      return nowFav;
+    } catch (e) {
+      console.error("pfacc-ai: toggle favorite error", e);
+      return false;
+    }
+  }
+
+  async function getRecentAiModels() {
+    try {
+      if (window.db && window.db.misc) {
+        const row = await window.db.misc.get("pfaccRecentModels");
+        if (row && Array.isArray(row.value) && row.value.length > 0) return row.value;
+      }
+    } catch (e) {}
+    return readRecentModelsLocalStorage();
+  }
+
+  async function recordRecentAiModel(modelName, provider) {
+    if (!modelName || typeof modelName !== "string") return;
+    const trimmed = modelName.trim();
+    if (!trimmed) return;
+    try {
+      let list = await getRecentAiModels();
+      list = list.filter(item => {
+        const name = typeof item === "string" ? item : item?.model;
+        return name && name.toLowerCase() !== trimmed.toLowerCase();
+      });
+      list.unshift({
+        model: trimmed,
+        provider: provider || (window.pfaccAiProvider ? window.pfaccAiProvider.getConfigSync().provider : "custom"),
+        timestamp: Date.now()
+      });
+      list = list.slice(0, 15);
+      try {
+        localStorage.setItem(RECENT_MODELS_LS_KEY, JSON.stringify(list));
+      } catch (e) {}
+      if (window.db && window.db.misc) {
+        await window.db.misc.put({ key: "pfaccRecentModels", value: list });
+      }
+    } catch (e) {
+      console.error("pfacc-ai: failed to record recent model", e);
+    }
+  }
+
+  async function removeRecentAiModel(modelName) {
+    if (!modelName || typeof modelName !== "string") return;
+    const trimmed = modelName.trim().toLowerCase();
+    try {
+      let list = await getRecentAiModels();
+      const origLen = list.length;
+      list = list.filter(item => {
+        const name = typeof item === "string" ? item : item?.model;
+        return name && name.toLowerCase() !== trimmed;
+      });
+      if (list.length !== origLen) {
+        try {
+          localStorage.setItem(RECENT_MODELS_LS_KEY, JSON.stringify(list));
+        } catch (e) {}
+        if (window.db && window.db.misc) {
+          await window.db.misc.put({ key: "pfaccRecentModels", value: list });
+        }
+        if (window.showToast) {
+          window.showToast(`Removed from recents: ${modelName}`, { type: "info" });
+        }
+      }
+    } catch (e) {
+      console.error("pfacc-ai: failed to remove recent model", e);
+    }
+  }
+  window.getRecentAiModels = getRecentAiModels;
+  window.recordRecentAiModel = recordRecentAiModel;
+  window.removeRecentAiModel = removeRecentAiModel;
+  window.getFavoriteAiModels = getFavoriteAiModels;
+  window.isFavoriteAiModelSync = isFavoriteAiModelSync;
+  window.toggleFavoriteAiModel = toggleFavoriteAiModel;
+
+  function readModelMetadataLocalStorage() {
+    try {
+      const raw = localStorage.getItem(MODELS_METADATA_LS_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return (parsed && typeof parsed === "object") ? parsed : {};
+    } catch (e) { return {}; }
+  }
+
+  window.__cachedModelMetadata = readModelMetadataLocalStorage();
+
+  function saveModelMetadataLocalStorage() {
+    try {
+      localStorage.setItem(MODELS_METADATA_LS_KEY, JSON.stringify(window.__cachedModelMetadata));
+    } catch (e) {}
+  }
+  window.__saveModelMetadataLocalStorage = saveModelMetadataLocalStorage;
+
+  function formatModelTokens(num) {
+    if (!num || isNaN(num)) return "";
+    num = Number(num);
+    if (num >= 1000000) return (num / 1000000).toFixed(num % 1000000 === 0 ? 0 : 1) + "M";
+    if (num >= 1000) return (num / 1000).toFixed(num % 1000 === 0 ? 0 : 1) + "k";
+    return num.toLocaleString();
+  }
+  window.__formatModelTokens = formatModelTokens;
+
+  function formatModelDate(val) {
+    if (!val) return "";
+    try {
+      let d;
+      if (typeof val === "number") {
+        d = val < 10000000000 ? new Date(val * 1000) : new Date(val);
+      } else {
+        d = new Date(val);
+      }
+      if (isNaN(d.getTime())) return "";
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    } catch (e) { return ""; }
+  }
+  window.__formatModelDate = formatModelDate;
+
+  function getModelMetadata(modelId) {
+    if (!modelId) return null;
+    const str = (modelId + "").trim();
+    return window.__cachedModelMetadata?.[str] || window.__cachedModelMetadata?.[str.toLowerCase()] || null;
+  }
+  window.getModelMetadata = getModelMetadata;
+
+  function formatModelTooltip(metaOrId) {
+    const meta = typeof metaOrId === "string" ? getModelMetadata(metaOrId) : metaOrId;
+    if (!meta) return "";
+    const id = meta.id || "";
+    const name = meta.name && meta.name !== id ? meta.name : "";
+    const parts = [];
+    if (name) parts.push(name + ` (${id})`);
+    else if (id) parts.push(id);
+
+    const sub = [];
+    if (meta.contextLength) sub.push(`Context: ${formatModelTokens(meta.contextLength)} tokens (${Number(meta.contextLength).toLocaleString()})`);
+    if (meta.created) {
+      const formattedDate = formatModelDate(meta.created);
+      if (formattedDate) sub.push(`Date Added: ${formattedDate}`);
+    }
+    if (sub.length > 0) parts.push(sub.join(" • "));
+    if (meta.description) parts.push(meta.description.trim());
+    return parts.join("\n\n");
+  }
+  window.__formatModelTooltip = formatModelTooltip;
 
   let aiConfig = Object.assign({}, DEFAULT_AI_CONFIG);
   let aiConfigLoaded = false;
@@ -744,6 +971,9 @@ notes to self:
       }
     } catch (e) {
       console.error("pfacc-ai: failed to persist config to db.misc", e);
+    }
+    if (aiConfig.model) {
+      recordRecentAiModel(aiConfig.model, aiConfig.provider);
     }
     updateContextAndTokenLimits();
     return cloneAiConfig(aiConfig);
@@ -3355,6 +3585,7 @@ notes to self:
         <button id="clearDataButton" class="appOptionButton" style="width: 4rem;">[icon("trash")]</button>
         <button id="exportDataButton" class="appOptionButton" style="margin-left: 0.5rem; margin-right: 0.5rem;">[icon("download")] export</button>
         <button class="appOptionButton" style="position:relative;">[icon("upload")] import<input id="importDataFileInput" style="position:absolute; top:0; left:0; right:0; bottom:0; opacity:0; cursor:pointer;" type="file"></button>
+        <button id="googleSyncButton" class="appOptionButton" style="margin-left: 0.5rem;" title="Google Drive Cloud Sync">[icon("cloud")] sync</button>
       </div>
       <!-- PERCHANCE EDIT: -->
       <!--<div style="height:0px; position:relative;">
@@ -3572,16 +3803,19 @@ notes to self:
           <div id="shortcutButtonsCtn"></div>
           <div id="storyGoalBannerCtn" style="margin-bottom:0.25rem;"></div>
           <div style="display:flex;">
-            <textarea id="messageInput" placeholder="Type your reply here..." style="flex-grow:1; min-height:4.5rem; font-size:100%; max-height:60vh; resize:none;" title="commands:&#10;/ai - prompt a reply from ai&#10;/ai &lt;instruction&gt; - prompt reply with instruction&#10;/ai @CharName#123 &lt;instruction&gt; - prompt reply with another character (ID=123)&#10;/user &lt;instruction&gt; - generate a user reply&#10;/sys &lt;instruction&gt; - prompt system reply with instruction&#10;/scenes - open scenes &amp; scenarios manager&#10;/goal &lt;description&gt; - set story end goal for this chat (slow burn)&#10;/goal clear - clear the story goal&#10;/goal - open story goal editor&#10;/shortcuts - open shortcuts manager&#10;/sum - open summary editor&#10;/mem - open memory editor&#10;/lore - open lore editor&#10;/lore &lt;text&gt; - add a lore entry&#10;/name &lt;name&gt; - set your name for this thread&#10;/avatar &lt;url&gt; - set your avatar image for this thread&#10;/import - add chat messages in bulk&#10;/spawn &lt;description&gt; - create a new character in this chat&#10;&#10;• You can add '/ai &lt;instruction&gt;' as the final line in your normal messages to instruct AI for its reply.&#10;• Double-click this text box to show input history"></textarea>
+            <textarea id="messageInput" placeholder="Type your reply here..." style="flex-grow:1; min-height:4.5rem; font-size:100%; max-height:60vh; resize:none;" title="commands:&#10;/ai - prompt a reply from ai&#10;/ai &lt;instruction&gt; - prompt reply with instruction&#10;/ai @CharName#123 &lt;instruction&gt; - prompt reply with another character (ID=123)&#10;/user &lt;instruction&gt; - generate a user reply&#10;/sys &lt;instruction&gt; - prompt system reply with instruction&#10;/scenes - open scenes &amp; scenarios manager&#10;/goal &lt;description&gt; - set story end goal for this chat (slow burn)&#10;/goal clear - clear the story goal&#10;/goal - open story goal editor&#10;/shortcuts - open shortcuts manager&#10;/ci (or /ci detailed) - toggle context info (or detailed context)&#10;/sum - open summary editor&#10;/mem - open memory editor&#10;/lore - open lore editor&#10;/lore &lt;text&gt; - add a lore entry&#10;/name &lt;name&gt; - set your name for this thread&#10;/avatar &lt;url&gt; - set your avatar image for this thread&#10;/import - add chat messages in bulk&#10;/spawn &lt;description&gt; - create a new character in this chat&#10;&#10;• You can add '/ai &lt;instruction&gt;' as the final line in your normal messages to instruct AI for its reply.&#10;• Double-click this text box to show input history"></textarea>
             <div style="display:flex; flex-direction:column; margin-left:0.25rem;">
               <button id="sendButton" style="min-width:80px; flex-grow:1; display:inline-flex; align-items:center; justify-content:center; gap:0.3rem;">[icon("paper-plane")] <span>send</span> <span id="sendButtonProviderIcon" style="display:inline-flex; align-items:center; font-size:0.9em; line-height:1;" title="AI Provider: Perchance (Free)"><span style="color:#2e9e44; display:inline-flex; align-items:center;">[icon("leaf")]</span></span></button>
               <div style="position:relative;">
                 <div id="threadOptionsPopup" data-original-display-value="flex" style="position:absolute; display:none; padding:0.5rem; background:var(--background); border-radius:var(--border-radius); width:max-content; right:0; bottom:0; border:1px solid var(--border-color); flex-direction: column; gap: 0.25rem;">
 <!--                   <button id="addShortcutButton" style="text-align:left;">✨ add shortcut</button> -->
+                  <button id="threadCurrentModelButton" style="text-align:left; display:none;">[icon("microchip")] model: ...</button>
                   <button onclick="toggleAvatarPicDisplay()" style="text-align:left;">[combineEmojis("🚫", "👤")] toggle pics</button>
                   <button id="changeThreadUserNameButton" style="text-align:left;">🏷️ change user name</button>
                   <button id="changeThreadUserAvatarUrlButton" style="text-align:left;">👤 change user pic</button>
                   <button id="toggleAutoReplyToUserButton" style="text-align:left;">🗣️ toggle autoreply</button>
+                  <button id="toggleContextInfoButton" style="text-align:left;">[icon("brain")] context info: 𝗼𝗳𝗳</button>
+                  <button id="toggleDetailedContextInfoButton" style="text-align:left;">[icon("book-open")] detailed context: 𝗼𝗳𝗳</button>
                   <button id="threadLevelResponseLengthButton" style="text-align:left;">📏 response length…</button>
                   <button id="threadSceneButton" style="text-align:left;">[icon("film")] scene / scenario</button>
                   <button id="storyGoalButton" style="text-align:left;">[icon("bullseye")] story goal / plot arc</button>
@@ -5015,6 +5249,912 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
     loadingModal.delete();
   });
 
+  // ════════════════════════════════════════════════════════════════════════════
+  // GOOGLE DRIVE APPDATA CLOUD SYNC
+  // Cross-browser backup and restore using Google Identity Services (GIS) & appDataFolder
+  // ════════════════════════════════════════════════════════════════════════════
+  const DEFAULT_GOOGLE_CLIENT_ID = "1052363904554-e8b18urns6lg5oenihmbh43hsl5bf0ok.apps.googleusercontent.com";
+  const GOOGLE_CLIENT_ID_KEY = "pfacc-google-client-id";
+  const GDRIVE_SYNC_FILENAME = "pfacc_cloud_sync.json";
+
+  const GDRIVE_ACCESS_TOKEN_KEY = "pfacc-gdrive-access-token";
+  const GDRIVE_EXPIRES_AT_KEY = "pfacc-gdrive-token-expires";
+  const GDRIVE_USER_KEY = "pfacc-gdrive-user-info";
+
+  // Restore cached session from localStorage so login persists across page reloads
+  window.__gdriveAccessToken = localStorage.getItem(GDRIVE_ACCESS_TOKEN_KEY) || null;
+  window.__gdriveTokenExpiresAt = Number(localStorage.getItem(GDRIVE_EXPIRES_AT_KEY) || 0);
+  try {
+    window.__gdriveUser = JSON.parse(localStorage.getItem(GDRIVE_USER_KEY) || "null");
+  } catch(e) {
+    window.__gdriveUser = null;
+  }
+
+  // If token has expired, clear in-memory active token while keeping user metadata for silent renewal
+  if (window.__gdriveAccessToken && Date.now() >= window.__gdriveTokenExpiresAt - 60000) {
+    window.__gdriveAccessToken = null;
+  }
+
+  function getGoogleClientId() {
+    return localStorage.getItem(GOOGLE_CLIENT_ID_KEY) || DEFAULT_GOOGLE_CLIENT_ID;
+  }
+
+  function setGoogleClientId(id) {
+    if (id && id.trim()) {
+      localStorage.setItem(GOOGLE_CLIENT_ID_KEY, id.trim());
+    } else {
+      localStorage.removeItem(GOOGLE_CLIENT_ID_KEY);
+    }
+  }
+
+  let gisLoadPromise = null;
+  function ensureGisLoaded() {
+    if (window.google?.accounts?.oauth2) return Promise.resolve();
+    if (gisLoadPromise) return gisLoadPromise;
+    gisLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve();
+      script.onerror = () => {
+        gisLoadPromise = null;
+        reject(new Error("Failed to load Google Identity Services library. Please check your internet connection or adblocker."));
+      };
+      document.head.appendChild(script);
+    });
+    return gisLoadPromise;
+  }
+
+  let isGdriveTokenRequestPending = false;
+  async function requestGoogleDriveToken(interactive = true) {
+    await ensureGisLoaded();
+    const clientId = getGoogleClientId();
+    if (!clientId || !clientId.trim()) {
+      throw new Error("No Google Client ID configured. Please configure it in the Cloud Sync settings.");
+    }
+
+    if (window.__gdriveAccessToken && Date.now() < window.__gdriveTokenExpiresAt - 60000) {
+      return window.__gdriveAccessToken;
+    }
+
+    if (isGdriveTokenRequestPending) {
+      return null;
+    }
+    isGdriveTokenRequestPending = true;
+
+    return new Promise((resolve, reject) => {
+      try {
+        const tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: clientId.trim(),
+          scope: "https://www.googleapis.com/auth/drive.appdata",
+          hint: window.__gdriveUser?.emailAddress || "",
+          callback: async (resp) => {
+            isGdriveTokenRequestPending = false;
+            if (resp.error) {
+              reject(new Error(resp.error_description || resp.error));
+              return;
+            }
+            window.__gdriveAccessToken = resp.access_token;
+            const expiresIn = Number(resp.expires_in) || 3500;
+            window.__gdriveTokenExpiresAt = Date.now() + (expiresIn * 1000);
+
+            try {
+              localStorage.setItem(GDRIVE_ACCESS_TOKEN_KEY, window.__gdriveAccessToken);
+              localStorage.setItem(GDRIVE_EXPIRES_AT_KEY, window.__gdriveTokenExpiresAt.toString());
+            } catch(e) {}
+
+            // Fetch user profile info from Drive API (fields=user)
+            try {
+              const aboutRes = await fetch("https://www.googleapis.com/drive/v3/about?fields=user", {
+                headers: { Authorization: `Bearer ${window.__gdriveAccessToken}` }
+              });
+              if (aboutRes.ok) {
+                const aboutData = await aboutRes.json();
+                window.__gdriveUser = aboutData.user || null;
+                if (window.__gdriveUser) {
+                  try {
+                    localStorage.setItem(GDRIVE_USER_KEY, JSON.stringify(window.__gdriveUser));
+                  } catch(e) {}
+                }
+              }
+            } catch(e) {
+              console.warn("Could not fetch user info from Drive API:", e);
+            }
+
+            resolve(window.__gdriveAccessToken);
+          },
+          error_callback: (err) => {
+            isGdriveTokenRequestPending = false;
+            reject(new Error(err.message || "Google Sign-In failed or popup was closed."));
+          }
+        });
+
+        tokenClient.requestAccessToken({ prompt: interactive ? "" : "none" });
+      } catch (e) {
+        isGdriveTokenRequestPending = false;
+        reject(e);
+      }
+    });
+  }
+
+  async function gdriveFindSyncFile(token) {
+    const url = `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='${GDRIVE_SYNC_FILENAME}' and trashed=false&fields=files(id,name,modifiedTime,size,description,appProperties)&pageSize=1`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `Failed to search Google Drive (HTTP ${res.status})`);
+    }
+    const data = await res.json();
+    return (data.files && data.files.length > 0) ? data.files[0] : null;
+  }
+
+  async function gdriveDownloadSyncFile(token, fileId) {
+    const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to download backup from Google Drive (HTTP ${res.status})`);
+    }
+    return await res.json();
+  }
+
+  async function gdriveUploadSyncFile(token, payloadObj, existingFileId = null) {
+    const fileContent = JSON.stringify(payloadObj);
+    const numChars = payloadObj.stats?.characters ?? 0;
+    const numThreads = payloadObj.stats?.threads ?? 0;
+    const numMsgs = payloadObj.stats?.messages ?? 0;
+    const exportedAt = payloadObj.exportedAt ?? Date.now();
+
+    const appProperties = {
+      characters: String(numChars),
+      threads: String(numThreads),
+      messages: String(numMsgs),
+      exportedAt: String(exportedAt)
+    };
+
+    const metadata = {
+      name: GDRIVE_SYNC_FILENAME,
+      description: `pfacc sync: ${numChars} characters, ${numThreads} chats, ${numMsgs} messages`,
+      appProperties: appProperties
+    };
+
+    if (existingFileId) {
+      // 1. Update file body content
+      const mediaUrl = `https://www.googleapis.com/upload/drive/v3/files/${existingFileId}?uploadType=media`;
+      const resMedia = await fetch(mediaUrl, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        body: fileContent
+      });
+      if (!resMedia.ok) {
+        const err = await resMedia.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Failed to update backup on Google Drive (HTTP ${resMedia.status})`);
+      }
+
+      // 2. Update metadata (description and appProperties)
+      const metaUrl = `https://www.googleapis.com/drive/v3/files/${existingFileId}?fields=id,name,modifiedTime,size,description,appProperties`;
+      const resMeta = await fetch(metaUrl, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        body: JSON.stringify(metadata)
+      });
+      if (!resMeta.ok) {
+        const err = await resMeta.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Failed to update backup metadata on Google Drive (HTTP ${resMeta.status})`);
+      }
+      return await resMeta.json();
+    } else {
+      metadata.parents = ["appDataFolder"];
+      const boundary = "-------pfacc_boundary_" + Date.now();
+      const delimiter = "\r\n--" + boundary + "\r\n";
+      const closeDelimiter = "\r\n--" + boundary + "--";
+
+      const multipartBody =
+        delimiter +
+        "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+        JSON.stringify(metadata) +
+        delimiter +
+        "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
+        fileContent +
+        closeDelimiter;
+
+      const url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime,size,description,appProperties";
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": `multipart/related; boundary=${boundary}`
+        },
+        body: multipartBody
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Failed to upload backup to Google Drive (HTTP ${res.status})`);
+      }
+      return await res.json();
+    }
+  }
+
+  function formatFileSize(bytes) {
+    if (!bytes || isNaN(bytes)) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  }
+
+  const GDRIVE_AUTOSYNC_KEY = "pfacc-gdrive-autosync-schedule";
+  const GDRIVE_LAST_SYNC_KEY = "pfacc-last-cloud-sync";
+  const GDRIVE_STATE_KEY = "pfacc-last-sync-state-key";
+
+  function getAutoSyncSchedule() {
+    return localStorage.getItem(GDRIVE_AUTOSYNC_KEY) || "manual";
+  }
+
+  function setAutoSyncSchedule(sched) {
+    localStorage.setItem(GDRIVE_AUTOSYNC_KEY, sched);
+    try { db.misc.put({ key: "pfaccGdriveAutosyncSchedule", value: sched }); } catch(e) {}
+  }
+
+  async function getLocalDataFingerprint() {
+    try {
+      const lastMsgId = (await db.messages.orderBy("id").last())?.id ?? 0;
+      const msgCount = await db.messages.count();
+      const charCount = await db.characters.count();
+      const threadCount = await db.threads.count();
+      return `${lastMsgId}_${msgCount}_${charCount}_${threadCount}`;
+    } catch(e) {
+      return String(Date.now());
+    }
+  }
+
+  let isAutoBackupRunning = false;
+  async function checkAndRunAutoBackup(isManualTrigger = false) {
+    const schedule = getAutoSyncSchedule();
+    if (schedule === "manual" && !isManualTrigger) return;
+    if (!window.__gdriveAccessToken || Date.now() >= window.__gdriveTokenExpiresAt - 60000) {
+      if (localStorage.getItem(GDRIVE_USER_KEY)) {
+        await requestGoogleDriveToken(false).catch(() => null);
+      }
+      if (!window.__gdriveAccessToken || Date.now() >= window.__gdriveTokenExpiresAt - 60000) return;
+    }
+    if (isAutoBackupRunning) return;
+
+    const intervalMap = {
+      "15m": 15 * 60 * 1000,
+      "30m": 30 * 60 * 1000,
+      "1h": 60 * 60 * 1000,
+      "2h": 2 * 60 * 60 * 1000,
+      "6h": 6 * 60 * 60 * 1000,
+      "12h": 12 * 60 * 60 * 1000,
+      "24h": 24 * 60 * 60 * 1000,
+    };
+
+    const lastSyncTime = Number(localStorage.getItem(GDRIVE_LAST_SYNC_KEY) || 0);
+    const now = Date.now();
+
+    if (schedule === "on-change") {
+      if (!window.__hasUnsavedChanges) return;
+      if (window.__lastActivityTime && now - window.__lastActivityTime < 120000) return;
+    } else if (intervalMap[schedule]) {
+      const requiredInterval = intervalMap[schedule];
+      if (now - lastSyncTime < requiredInterval && !isManualTrigger) return;
+    } else if (!isManualTrigger) {
+      return;
+    }
+
+    const currentFingerprint = await getLocalDataFingerprint();
+    const lastSavedFingerprint = localStorage.getItem(GDRIVE_STATE_KEY);
+    if (currentFingerprint === lastSavedFingerprint && !isManualTrigger) {
+      return;
+    }
+
+    try {
+      isAutoBackupRunning = true;
+      console.log("[Google Drive Sync] Checking cloud backup before running auto-backup...");
+
+      const existingFile = await gdriveFindSyncFile(window.__gdriveAccessToken);
+
+      // Conflict detection: If Drive backup shows a newer date than the last local sync, revert to manual & notify
+      if (existingFile && !isManualTrigger) {
+        const cloudTime = Number(existingFile.appProperties?.exportedAt || new Date(existingFile.modifiedTime).getTime());
+        if (cloudTime > lastSyncTime + 5000 || lastSyncTime === 0) {
+          setAutoSyncSchedule("manual");
+
+          const scheduleSelect = document.querySelector(".gdriveScheduleSelect");
+          if (scheduleSelect) scheduleSelect.value = "manual";
+          const scheduleBadge = document.querySelector(".gdriveAutoSyncBadge");
+          if (scheduleBadge) {
+            scheduleBadge.textContent = "Disabled";
+            scheduleBadge.style.background = "var(--button-bg)";
+            scheduleBadge.style.color = "var(--text-color)";
+          }
+
+          const cloudDateStr = new Date(cloudTime).toLocaleString();
+          const cloudChars = existingFile.appProperties?.characters || "?";
+          const cloudThreads = existingFile.appProperties?.threads || "?";
+          const cloudMsgs = existingFile.appProperties?.messages || "?";
+
+          const warnMsg = `⚠️ Cloud Sync Paused: A newer backup (${cloudDateStr}, ${cloudMsgs} msgs, ${cloudThreads} chats) was found on Google Drive. Switched to Manual backup so your cloud data is not overwritten.`;
+          console.warn("[Google Drive Sync]", warnMsg);
+
+          showToast(warnMsg, {
+            type: "warning",
+            duration: 12000,
+            actions: [
+              {
+                label: "Open Cloud Sync",
+                onClick: () => {
+                  if (typeof window.openGoogleDriveSyncModal === "function") {
+                    window.openGoogleDriveSyncModal();
+                  }
+                }
+              }
+            ]
+          });
+          return;
+        }
+      }
+
+      console.log("[Google Drive Sync] Running scheduled auto-backup...");
+
+      const blob = await db.export({});
+      const dexieJson = await new Response(blob).json();
+      const numCharacters = await db.characters.count();
+      const numThreads = await db.threads.count();
+      const numMessages = await db.messages.count();
+
+      const payload = {
+        pfaccSyncVersion: 1,
+        exportedAt: now,
+        device: (navigator.userAgent || "Unknown").slice(0, 120),
+        stats: {
+          characters: numCharacters,
+          threads: numThreads,
+          messages: numMessages
+        },
+        dexieData: dexieJson
+      };
+
+      const existingId = existingFile ? existingFile.id : null;
+      await gdriveUploadSyncFile(window.__gdriveAccessToken, payload, existingId);
+
+      localStorage.setItem(GDRIVE_LAST_SYNC_KEY, now.toString());
+      localStorage.setItem(GDRIVE_STATE_KEY, currentFingerprint);
+      window.__hasUnsavedChanges = false;
+
+      console.log("[Google Drive Sync] Scheduled auto-backup completed successfully.");
+    } catch(err) {
+      console.warn("[Google Drive Sync] Scheduled auto-backup failed:", err);
+    } finally {
+      isAutoBackupRunning = false;
+    }
+  }
+
+  window.__hasUnsavedChanges = false;
+  window.__lastActivityTime = Date.now();
+  window.markDataChangedForSync = function() {
+    window.__hasUnsavedChanges = true;
+    window.__lastActivityTime = Date.now();
+  };
+
+  if (!window.__gdriveAutoSyncIntervalId) {
+    window.__gdriveAutoSyncIntervalId = setInterval(() => {
+      checkAndRunAutoBackup();
+    }, 60000);
+  }
+
+  window.openGoogleDriveSyncModal = async function() {
+    // If token expired or not loaded, attempt silent renewal if user previously signed in
+    if (!window.__gdriveAccessToken && localStorage.getItem(GDRIVE_USER_KEY)) {
+      await requestGoogleDriveToken(false).catch(() => null);
+    }
+
+    let rootEl = document.createElement("div");
+    rootEl.className = "googleDriveSyncModalRoot";
+    rootEl.style.cssText = "display:flex; flex-direction:column; gap:0.75rem; text-align:left; color:var(--text-color); font-size:0.85rem;";
+
+    // Header
+    let headerBox = document.createElement("div");
+    headerBox.style.cssText = "border-bottom:1px solid var(--border-color); padding-bottom:0.6rem;";
+    headerBox.innerHTML = `
+      <div style="font-size:1.1rem; font-weight:700; display:flex; align-items:center; gap:0.45rem;">
+        <span style="color:#4285f4; display:inline-flex; align-items:center;">${faIcon("cloud") || "☁️"}</span> Google Drive Cloud Sync
+      </div>
+      <div style="font-size:0.78rem; opacity:0.75; margin-top:0.2rem; line-height:1.4;">
+        Save and restore your characters, chats, and settings across multiple browsers using your personal Google Drive.
+      </div>
+    `;
+    rootEl.appendChild(headerBox);
+
+    // Status / Account Banner
+    let statusBanner = document.createElement("div");
+    statusBanner.style.cssText = "background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius); padding:0.65rem 0.85rem;";
+    rootEl.appendChild(statusBanner);
+
+    // Comparison Dashboard
+    let dashboard = document.createElement("div");
+    dashboard.style.cssText = "display:grid; grid-template-columns:1fr 1fr; gap:0.65rem;";
+    rootEl.appendChild(dashboard);
+
+    // Conflict / Attention Notice Box
+    let noticeBox = document.createElement("div");
+    noticeBox.style.cssText = "display:none; flex-direction:column; gap:0.3rem;";
+    rootEl.appendChild(noticeBox);
+
+    // Actions Box
+    let actionsBox = document.createElement("div");
+    actionsBox.style.cssText = "display:flex; flex-direction:column; gap:0.5rem; margin-top:0.2rem;";
+    rootEl.appendChild(actionsBox);
+
+    // Activity Log / Status label
+    let logBox = document.createElement("div");
+    logBox.style.cssText = "font-size:0.75rem; min-height:1.2rem; opacity:0.85;";
+    rootEl.appendChild(logBox);
+
+    // Automatic Cloud Backup Schedule Section
+    let scheduleCard = document.createElement("div");
+    scheduleCard.className = "gdriveScheduleCard";
+    scheduleCard.style.cssText = "background:var(--box-color, rgba(127,127,127,0.06)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm); padding:0.6rem; display:flex; flex-direction:column; gap:0.4rem;";
+
+    const curSchedule = getAutoSyncSchedule();
+    scheduleCard.innerHTML = `
+      <div style="font-weight:700; font-size:0.82rem; display:flex; align-items:center; justify-content:space-between;">
+        <span style="display:flex; align-items:center; gap:0.35rem;">
+          ${faIcon("clock") || "⏱"} Automatic Cloud Backup
+        </span>
+        <span class="gdriveAutoSyncBadge" style="font-size:0.7rem; font-weight:600; padding:0.1rem 0.45rem; border-radius:100px; background:${curSchedule === "manual" ? "var(--button-bg)" : "rgba(46,158,68,0.15)"}; color:${curSchedule === "manual" ? "var(--text-color)" : "#2e9e44"}; border:1px solid var(--border-color);">
+          ${curSchedule === "manual" ? "Disabled" : "Active"}
+        </span>
+      </div>
+      <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.15rem;">
+        <label style="font-size:0.75rem; opacity:0.85; white-space:nowrap;">Schedule:</label>
+        <select class="gdriveScheduleSelect" style="flex:1; padding:0.35rem 0.5rem; border-radius:var(--border-radius-sm); border:1px solid var(--border-color); background:var(--background); color:var(--text-color); font-size:0.78rem;">
+          <option value="manual" ${curSchedule === "manual" ? "selected" : ""}>Manual only (Default)</option>
+          <option value="on-change" ${curSchedule === "on-change" ? "selected" : ""}>After changes (Debounced 2 min)</option>
+          <option value="15m" ${curSchedule === "15m" ? "selected" : ""}>Every 15 minutes</option>
+          <option value="30m" ${curSchedule === "30m" ? "selected" : ""}>Every 30 minutes</option>
+          <option value="1h" ${curSchedule === "1h" ? "selected" : ""}>Every 1 hour</option>
+          <option value="2h" ${curSchedule === "2h" ? "selected" : ""}>Every 2 hours</option>
+          <option value="6h" ${curSchedule === "6h" ? "selected" : ""}>Every 6 hours</option>
+          <option value="12h" ${curSchedule === "12h" ? "selected" : ""}>Every 12 hours</option>
+          <option value="24h" ${curSchedule === "24h" ? "selected" : ""}>Every 24 hours</option>
+        </select>
+      </div>
+      <div style="font-size:0.71rem; opacity:0.75; line-height:1.35;">
+        Backups only upload when new messages or characters are detected since the last save. If a newer backup is detected on Drive, auto-backup safely pauses and reverts to manual.
+      </div>
+    `;
+    rootEl.appendChild(scheduleCard);
+
+    const scheduleSelect = scheduleCard.querySelector(".gdriveScheduleSelect");
+    const scheduleBadge = scheduleCard.querySelector(".gdriveAutoSyncBadge");
+    scheduleSelect.addEventListener("change", () => {
+      const val = scheduleSelect.value;
+      setAutoSyncSchedule(val);
+      scheduleBadge.textContent = val === "manual" ? "Disabled" : "Active";
+      scheduleBadge.style.background = val === "manual" ? "var(--button-bg)" : "rgba(46,158,68,0.15)";
+      scheduleBadge.style.color = val === "manual" ? "var(--text-color)" : "#2e9e44";
+      showToast(`Auto-backup set to: ${scheduleSelect.options[scheduleSelect.selectedIndex].text}`);
+    });
+
+    let currentDriveFile = null;
+    let isCloudNewer = false;
+
+    async function refreshDashboard() {
+      // Gather local stats
+      const numChars = await db.characters.count();
+      const numThreads = await db.threads.count();
+      const numMessages = await db.messages.count();
+      const lastLocalSync = localStorage.getItem("pfacc-last-cloud-sync");
+      const lastLocalSyncNum = Number(lastLocalSync || 0);
+      const lastLocalSyncFormatted = lastLocalSync ? new Date(lastLocalSyncNum).toLocaleString() : "Never synced";
+
+      dashboard.innerHTML = `
+        <div style="background:var(--box-color, rgba(127,127,127,0.06)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm); padding:0.6rem;">
+          <div style="font-weight:700; font-size:0.82rem; margin-bottom:0.35rem; display:flex; align-items:center; gap:0.35rem;">
+            ${faIcon("desktop") || "💻"} Local Browser
+          </div>
+          <div style="font-size:0.75rem; opacity:0.85; line-height:1.5;">
+            <div>Characters: <b>${numChars}</b></div>
+            <div>Chats: <b>${numThreads}</b></div>
+            <div>Messages: <b>${numMessages}</b></div>
+            <div style="margin-top:0.25rem; font-size:0.7rem; opacity:0.75;">Last Sync: ${lastLocalSyncFormatted}</div>
+          </div>
+        </div>
+
+        <div class="gdriveCloudCard" style="background:var(--box-color, rgba(127,127,127,0.06)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm); padding:0.6rem;">
+          <div style="font-weight:700; font-size:0.82rem; margin-bottom:0.35rem; display:flex; align-items:center; gap:0.35rem;">
+            <span style="color:#4285f4;">${faIcon("cloud") || "☁️"}</span> Google Drive
+          </div>
+          <div class="gdriveCloudInfo" style="font-size:0.75rem; opacity:0.85; line-height:1.5;">
+            ${window.__gdriveAccessToken ? `<span style="opacity:0.6;">Checking cloud backup...</span>` : `<span style="opacity:0.6;">Sign in to view backup.</span>`}
+          </div>
+        </div>
+      `;
+
+      isCloudNewer = false;
+      noticeBox.style.display = "none";
+      noticeBox.innerHTML = "";
+
+      if (window.__gdriveAccessToken) {
+        try {
+          currentDriveFile = await gdriveFindSyncFile(window.__gdriveAccessToken);
+          const cloudCardEl = dashboard.querySelector(".gdriveCloudCard");
+          const cloudInfoEl = dashboard.querySelector(".gdriveCloudInfo");
+
+          if (cloudInfoEl && currentDriveFile) {
+            // Check if stats exist in appProperties; if not (older backup), fetch once to backfill
+            let cloudChars = currentDriveFile.appProperties?.characters;
+            let cloudThreads = currentDriveFile.appProperties?.threads;
+            let cloudMessages = currentDriveFile.appProperties?.messages;
+            let cloudExportedAt = currentDriveFile.appProperties?.exportedAt ? Number(currentDriveFile.appProperties.exportedAt) : new Date(currentDriveFile.modifiedTime).getTime();
+
+            if (cloudChars == null || cloudThreads == null || cloudMessages == null) {
+              try {
+                const payload = await gdriveDownloadSyncFile(window.__gdriveAccessToken, currentDriveFile.id);
+                if (payload && payload.stats) {
+                  cloudChars = String(payload.stats.characters ?? 0);
+                  cloudThreads = String(payload.stats.threads ?? 0);
+                  cloudMessages = String(payload.stats.messages ?? 0);
+                  cloudExportedAt = Number(payload.exportedAt || new Date(currentDriveFile.modifiedTime).getTime());
+                  currentDriveFile.appProperties = {
+                    characters: cloudChars,
+                    threads: cloudThreads,
+                    messages: cloudMessages,
+                    exportedAt: String(cloudExportedAt)
+                  };
+                  fetch(`https://www.googleapis.com/drive/v3/files/${currentDriveFile.id}?fields=id,appProperties`, {
+                    method: "PATCH",
+                    headers: {
+                      Authorization: `Bearer ${window.__gdriveAccessToken}`,
+                      "Content-Type": "application/json; charset=UTF-8"
+                    },
+                    body: JSON.stringify({ appProperties: currentDriveFile.appProperties })
+                  }).catch(() => {});
+                }
+              } catch(e) {
+                console.warn("[Google Drive Sync] Could not backfill stats:", e);
+              }
+            }
+
+            const modDate = new Date(cloudExportedAt || currentDriveFile.modifiedTime).toLocaleString();
+            const sizeStr = formatFileSize(Number(currentDriveFile.size) || 0);
+
+            // Determine if cloud backup is newer than local sync
+            isCloudNewer = (cloudExportedAt > lastLocalSyncNum + 5000) || (lastLocalSyncNum === 0 && (numChars > 0 || numMessages > 0));
+
+            cloudCardEl.innerHTML = `
+              <div style="font-weight:700; font-size:0.82rem; margin-bottom:0.35rem; display:flex; align-items:center; justify-content:space-between;">
+                <span style="display:flex; align-items:center; gap:0.35rem;">
+                  <span style="color:#4285f4;">${faIcon("cloud") || "☁️"}</span> Google Drive
+                </span>
+                ${isCloudNewer ? `
+                  <span style="font-size:0.68rem; font-weight:700; color:#d97706; background:rgba(217,119,6,0.15); border:1px solid rgba(217,119,6,0.3); border-radius:100px; padding:0.1rem 0.4rem; display:inline-flex; align-items:center; gap:0.25rem;">
+                    ${faIcon("triangle-exclamation") || "⚠️"} Newer
+                  </span>
+                ` : `
+                  <span style="font-size:0.68rem; font-weight:600; color:#2e9e44; background:rgba(46,158,68,0.12); border:1px solid rgba(46,158,68,0.25); border-radius:100px; padding:0.1rem 0.4rem; display:inline-flex; align-items:center; gap:0.2rem;">
+                    ${faIcon("circle-check") || "✓"} Synced
+                  </span>
+                `}
+              </div>
+              <div class="gdriveCloudInfo" style="font-size:0.75rem; opacity:0.85; line-height:1.5;">
+                <div>Characters: <b>${cloudChars ?? "—"}</b></div>
+                <div>Chats: <b>${cloudThreads ?? "—"}</b></div>
+                <div>Messages: <b>${cloudMessages ?? "—"}</b></div>
+                <div style="margin-top:0.25rem; font-size:0.7rem; opacity:0.75;">Modified: ${modDate}</div>
+                <div style="font-size:0.7rem; opacity:0.75;">Size: ${sizeStr}</div>
+              </div>
+            `;
+
+            if (isCloudNewer) {
+              noticeBox.style.display = "flex";
+              noticeBox.innerHTML = `
+                <div style="background:rgba(217,119,6,0.12); border:1px solid rgba(217,119,6,0.35); border-radius:var(--border-radius-sm); padding:0.55rem 0.75rem; font-size:0.75rem; color:var(--text-color); display:flex; flex-direction:column; gap:0.25rem;">
+                  <div style="font-weight:700; color:#d97706; display:flex; align-items:center; gap:0.35rem;">
+                    ${faIcon("triangle-exclamation") || "⚠️"} Cloud backup is newer than this browser
+                  </div>
+                  <div style="opacity:0.9; line-height:1.4;">
+                    Google Drive has a newer backup from <b>${modDate}</b> containing <b>${cloudMessages ?? "?"}</b> messages across <b>${cloudThreads ?? "?"}</b> chats. To avoid losing cloud updates, click <b>Restore to this Browser</b> below.
+                  </div>
+                </div>
+              `;
+            }
+          } else if (cloudInfoEl) {
+            cloudInfoEl.innerHTML = `
+              <div style="opacity:0.75; font-style:italic; margin-top:0.2rem;">
+                No cloud backup found on Drive yet. Click "Upload to Google Drive" to create one.
+              </div>
+            `;
+          }
+        } catch(e) {
+          console.error("Error querying Drive backup:", e);
+          const cloudInfoEl = dashboard.querySelector(".gdriveCloudInfo");
+          if (cloudInfoEl) {
+            cloudInfoEl.innerHTML = `<span style="color:#d64545;">Failed to check: ${sanitizeHtml(e.message)}</span>`;
+          }
+        }
+      }
+
+      renderActions();
+    }
+
+    function renderStatusBanner() {
+      if (window.__gdriveAccessToken && Date.now() < window.__gdriveTokenExpiresAt - 60000) {
+        const user = window.__gdriveUser;
+        const userImg = user && user.photoLink ? `<img src="${user.photoLink}" style="width:28px; height:28px; border-radius:50%; flex-shrink:0;">` : `<span style="font-size:1.4rem; color:#4285f4;">${faIcon("google") || "G"}</span>`;
+        const userName = user && user.displayName ? sanitizeHtml(user.displayName) : "Google User";
+        const userEmail = user && user.emailAddress ? `<span style="opacity:0.75; font-size:0.75rem;">(${sanitizeHtml(user.emailAddress)})</span>` : "";
+
+        statusBanner.innerHTML = `
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:0.6rem;">
+            <div style="display:flex; align-items:center; gap:0.6rem;">
+              ${userImg}
+              <div>
+                <div style="font-weight:600; font-size:0.85rem; display:flex; align-items:center; gap:0.35rem;">
+                  ${userName} ${userEmail}
+                </div>
+                <div style="color:#2e9e44; font-size:0.74rem; font-weight:600; display:flex; align-items:center; gap:0.25rem;">
+                  ${faIcon("circle-check") || "●"} Connected to Google Drive AppData
+                </div>
+              </div>
+            </div>
+            <button type="button" class="gdriveDisconnectBtn" style="padding:0.25rem 0.55rem; font-size:0.72rem; background:var(--button-bg); border:1px solid var(--border-color); border-radius:var(--border-radius-sm); color:var(--text-color); cursor:pointer; display:flex; align-items:center; gap:0.3rem;">
+              ${faIcon("right-from-bracket") || ""} Disconnect
+            </button>
+          </div>
+        `;
+
+        statusBanner.querySelector(".gdriveDisconnectBtn")?.addEventListener("click", () => {
+          if (window.__gdriveAccessToken && window.google?.accounts?.oauth2?.revoke) {
+            try { google.accounts.oauth2.revoke(window.__gdriveAccessToken, () => {}); } catch(e) {}
+          }
+          window.__gdriveAccessToken = null;
+          window.__gdriveTokenExpiresAt = 0;
+          window.__gdriveUser = null;
+          currentDriveFile = null;
+          try {
+            localStorage.removeItem(GDRIVE_ACCESS_TOKEN_KEY);
+            localStorage.removeItem(GDRIVE_EXPIRES_AT_KEY);
+            localStorage.removeItem(GDRIVE_USER_KEY);
+          } catch(e) {}
+          renderStatusBanner();
+          refreshDashboard();
+          showToast("Disconnected from Google Drive.");
+        });
+      } else {
+        statusBanner.innerHTML = `
+          <div style="display:flex; flex-direction:column; gap:0.4rem; text-align:center; padding:0.3rem 0;">
+            <div style="font-weight:600; font-size:0.88rem;">Sign in to sync your chat data</div>
+            <div style="font-size:0.75rem; opacity:0.8; max-width:400px; margin:0 auto; line-height:1.4;">
+              Authorizes pfacc to store an encrypted backup file in a private, hidden folder on your Google Drive (<code>appDataFolder</code>).
+            </div>
+            <button type="button" class="gdriveSignInBtn" style="align-self:center; margin-top:0.4rem; padding:0.5rem 1.1rem; font-size:0.85rem; font-weight:600; background:#4285f4; color:#fff; border:none; border-radius:var(--border-radius-sm); cursor:pointer; display:inline-flex; align-items:center; gap:0.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
+              <span style="display:inline-flex; align-items:center; font-size:1rem;">${faIcon("google") || "G"}</span> Sign in with Google
+            </button>
+          </div>
+        `;
+
+        statusBanner.querySelector(".gdriveSignInBtn")?.addEventListener("click", async () => {
+          try {
+            logBox.textContent = "Opening Google Sign-In popup...";
+            logBox.style.color = "inherit";
+            await requestGoogleDriveToken(true);
+            logBox.textContent = "Signed in successfully!";
+            logBox.style.color = "#2e9e44";
+            renderStatusBanner();
+            await refreshDashboard();
+          } catch(e) {
+            console.error("Sign in failed:", e);
+            logBox.textContent = "Sign in error: " + (e.message || e);
+            logBox.style.color = "#d64545";
+          }
+        });
+      }
+    }
+
+    function renderActions() {
+      actionsBox.innerHTML = "";
+      if (!window.__gdriveAccessToken) return;
+
+      let btnRow = document.createElement("div");
+      btnRow.style.cssText = "display:flex; gap:0.5rem; flex-wrap:wrap;";
+
+      let uploadBtn = document.createElement("button");
+      uploadBtn.type = "button";
+      uploadBtn.style.cssText = "flex:1; min-width:140px; padding:0.55rem 0.8rem; font-size:0.82rem; font-weight:600; background:" + (isCloudNewer ? "var(--button-bg)" : "#2e9e44") + "; color:" + (isCloudNewer ? "var(--text-color)" : "#fff") + "; border:" + (isCloudNewer ? "1px solid var(--border-color)" : "none") + "; border-radius:var(--border-radius-sm); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.4rem;";
+      uploadBtn.innerHTML = `${faIcon("cloud-arrow-up") || "⬆"} Upload to Google Drive`;
+      uploadBtn.title = "Exports current local data and saves to Google Drive.";
+
+      uploadBtn.addEventListener("click", async () => {
+        if (isCloudNewer && currentDriveFile) {
+          const modDate = new Date(Number(currentDriveFile.appProperties?.exportedAt) || currentDriveFile.modifiedTime).toLocaleString();
+          const cloudChars = currentDriveFile.appProperties?.characters ?? "?";
+          const cloudChats = currentDriveFile.appProperties?.threads ?? "?";
+          const cloudMsgs = currentDriveFile.appProperties?.messages ?? "?";
+          const lastLocalSync = localStorage.getItem("pfacc-last-cloud-sync");
+          const lastLocalSyncFormatted = lastLocalSync ? new Date(Number(lastLocalSync)).toLocaleString() : "Never synced";
+
+          const warnConfirm = confirm(`⚠️ CONFLICT WARNING:\n\nThe cloud backup on Google Drive was updated on ${modDate} (${cloudChars} chars, ${cloudChats} chats, ${cloudMsgs} messages), which is NEWER than your last local sync (${lastLocalSyncFormatted}).\n\nUploading now will OVERWRITE the newer cloud backup with this browser's local data.\n\nDo you want to overwrite Google Drive anyway?`);
+          if (!warnConfirm) return;
+        } else {
+          if (!confirm("Upload current local data to Google Drive? This will update your cloud backup snapshot.")) return;
+        }
+
+        uploadBtn.disabled = true;
+        const origText = uploadBtn.innerHTML;
+        uploadBtn.innerHTML = `${faIcon("spinner") || "⏳"} Uploading...`;
+        logBox.textContent = "Exporting local database and uploading to Google Drive...";
+        logBox.style.color = "inherit";
+
+        try {
+          const blob = await db.export({});
+          const dexieJson = await new Response(blob).json();
+          const numCharacters = await db.characters.count();
+          const numThreads = await db.threads.count();
+          const numMessages = await db.messages.count();
+          const now = Date.now();
+
+          const payload = {
+            pfaccSyncVersion: 1,
+            exportedAt: now,
+            device: (navigator.userAgent || "Unknown").slice(0, 120),
+            stats: {
+              characters: numCharacters,
+              threads: numThreads,
+              messages: numMessages
+            },
+            dexieData: dexieJson
+          };
+
+          const existingId = currentDriveFile ? currentDriveFile.id : null;
+          const resultFile = await gdriveUploadSyncFile(window.__gdriveAccessToken, payload, existingId);
+          currentDriveFile = resultFile;
+          localStorage.setItem(GDRIVE_LAST_SYNC_KEY, now.toString());
+          localStorage.setItem(GDRIVE_STATE_KEY, await getLocalDataFingerprint());
+          window.__hasUnsavedChanges = false;
+
+          logBox.textContent = "Backup successfully saved to Google Drive!";
+          logBox.style.color = "#2e9e44";
+          showToast("☁️ Cloud backup saved successfully!", { type: "success" });
+          await refreshDashboard();
+        } catch(err) {
+          console.error("Cloud upload error:", err);
+          logBox.textContent = "Upload failed: " + (err.message || err);
+          logBox.style.color = "#d64545";
+          showToast("Failed to upload: " + err.message, { type: "error" });
+        } finally {
+          uploadBtn.disabled = false;
+          uploadBtn.innerHTML = origText;
+        }
+      });
+      btnRow.appendChild(uploadBtn);
+
+      let downloadBtn = document.createElement("button");
+      downloadBtn.type = "button";
+      downloadBtn.style.cssText = "flex:1; min-width:140px; padding:0.55rem 0.8rem; font-size:0.82rem; font-weight:600; background:" + (isCloudNewer ? "#2e9e44" : "var(--button-bg)") + "; color:" + (isCloudNewer ? "#fff" : "var(--text-color)") + "; border:" + (isCloudNewer ? "none" : "1px solid var(--border-color)") + "; border-radius:var(--border-radius-sm); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.4rem;" + (isCloudNewer ? " box-shadow:0 0 0 2px rgba(46,158,68,0.25);" : "");
+      downloadBtn.innerHTML = `${faIcon("cloud-arrow-down") || "⬇"} Restore to this Browser`;
+      downloadBtn.title = isCloudNewer ? "Recommended: Download newer cloud backup and sync into this browser." : "Downloads cloud backup from Google Drive and imports into this browser.";
+      if (!currentDriveFile) {
+        downloadBtn.disabled = true;
+        downloadBtn.style.opacity = "0.5";
+        downloadBtn.style.cursor = "default";
+      }
+
+      downloadBtn.addEventListener("click", async () => {
+        if (!currentDriveFile) return;
+
+        const restoreChoice = await prompt2({
+          keepExistingData: {
+            label: "Restore Mode:",
+            type: "select",
+            options: [
+              { value: "no", content: "Replace all local data (Recommended for syncing new browser)" },
+              { value: "yes", content: "Merge with local data (Keep current items and add missing)" }
+            ],
+            defaultValue: "no"
+          }
+        }, {
+          submitButtonText: "Proceed with Restore"
+        });
+
+        if (!restoreChoice) return;
+
+        if (restoreChoice.keepExistingData === "no" && !confirm("⚠️ WARNING: This will REPLACE all local chats and characters in this browser with the cloud backup. Do you want to proceed?")) {
+          return;
+        }
+
+        downloadBtn.disabled = true;
+        const origText = downloadBtn.innerHTML;
+        downloadBtn.innerHTML = `${faIcon("spinner") || "⏳"} Downloading...`;
+        logBox.textContent = "Downloading backup from Google Drive...";
+        logBox.style.color = "inherit";
+
+        try {
+          const payload = await gdriveDownloadSyncFile(window.__gdriveAccessToken, currentDriveFile.id);
+          const targetData = payload.dexieData || payload;
+          if (!targetData || !targetData.data || !targetData.data.data) {
+            throw new Error("Downloaded file is not a valid pfacc backup.");
+          }
+
+          logBox.textContent = "Importing into browser storage...";
+          const dexieBlob = new Blob([JSON.stringify(targetData)], { type: "application/json" });
+
+          let loadingModal = createLoadingModal(`Importing data from Google Drive... <span class="importLoadingProgressIndicator"></span>`);
+          const importOptions = {
+            keepExistingData: restoreChoice.keepExistingData,
+            loadingModal: loadingModal,
+            onProgress: ({ message }) => {
+              const ind = document.querySelector(".importLoadingProgressIndicator");
+              if (ind) ind.textContent = message;
+            }
+          };
+
+          const res = await tryImportingDexieFile(dexieBlob, importOptions);
+          if (res === "finished") {
+            const restoredTime = Number(payload.exportedAt) || Date.now();
+            localStorage.setItem(GDRIVE_LAST_SYNC_KEY, restoredTime.toString());
+            localStorage.setItem(GDRIVE_STATE_KEY, await getLocalDataFingerprint());
+            window.__hasUnsavedChanges = false;
+
+            logBox.textContent = "Data successfully restored from Google Drive!";
+            logBox.style.color = "#2e9e44";
+            showToast("☁️ Restored data from Google Drive!", { type: "success" });
+            await refreshDashboard();
+
+            // Close modal after successful restore
+            const closeBtn = rootEl.closest(".window")?.querySelector(".closeButton") || document.querySelector(".window .closeButton");
+            if (closeBtn) closeBtn.click();
+          } else {
+            throw new Error("Import failed or was incomplete.");
+          }
+        } catch(err) {
+          console.error("Cloud restore error:", err);
+          logBox.textContent = "Restore failed: " + (err.message || err);
+          logBox.style.color = "#d64545";
+          showToast("Restore failed: " + err.message, { type: "error" });
+        } finally {
+          downloadBtn.disabled = false;
+          downloadBtn.innerHTML = origText;
+        }
+      });
+      btnRow.appendChild(downloadBtn);
+
+      actionsBox.appendChild(btnRow);
+    }
+
+    renderStatusBanner();
+    await refreshDashboard();
+
+    await prompt2({
+      gdriveSyncContent: {
+        type: "none",
+        html: rootEl
+      }
+    }, {
+      width: "560px",
+      submitButtonText: false,
+      cancelButtonText: "Close"
+    });
+  };
+
+  $.googleSyncButton?.addEventListener("click", () => {
+    if (typeof window.openGoogleDriveSyncModal === "function") {
+      window.openGoogleDriveSyncModal();
+    }
+  });
+
   // This renders the list of threads in the left column.
   async function renderThreadList(opts={}) {
     console.log("renderThreadList called");
@@ -5972,15 +7112,21 @@ window.maxMessagesButtonModify = maxMessagesButtonModify;
       buttonsEl = buttonsEl.firstElementChild;
       $.messageFeed.prepend(buttonsEl);
     }
-    if (existingCharacter.customData?.contextInfo?.basic?.info) {
+    const hasBasicInfo = !!existingCharacter?.customData?.contextInfo?.basic?.info;
+    const isBasicEnabled = existingCharacter?.customData?.contextInfo?.basic?.enabled === "yes";
+    const isDetailedEnabled = existingCharacter?.customData?.contextInfo?.detailed?.enabled === "yes";
+    if (hasBasicInfo || isBasicEnabled || isDetailedEnabled) {
       if (!$.messageFeed.querySelector("#messageFeedTopContextInfo")) {
-        let contextInfoTextContent = existingCharacter.customData.contextInfo.basic.info.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+        let rawInfo = existingCharacter.customData?.contextInfo?.basic?.info || (isBasicEnabled ? "Context info active — awaiting next messages to generate status." : "Context info");
+        let contextInfoTextContent = rawInfo.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
         let contextInfoEl = document.createElement("div");
         contextInfoEl.innerHTML = `
               <div id="messageFeedTopContextInfo" style="position: sticky; top: 0; z-index: 3; text-align:center; background: var(--background); padding: 0.5rem 0 0.25rem 0; box-shadow: 0 2px 4px rgba(0,0,0,0.15);">
-                <div id="contextInfoToggleBar" title="Click to collapse/expand the context info" style="cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.35rem; font-size: 0.8rem; opacity:0.85; user-select:none; padding-bottom:0.2rem;">
+                <div id="contextInfoToggleBar" title="Click to collapse/expand the context info" style="cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.45rem; font-size: 0.8rem; opacity:0.85; user-select:none; padding-bottom:0.2rem;">
                   <span id="contextInfoChevron">▾</span>
                   <span>context info</span>
+                  <button type="button" class="ciBarToggleBasic" title="Click to toggle basic context info auto-updates" style="border:none; border-radius:100px; padding:1px 7px; font-size:0.7rem; font-weight:600; cursor:pointer; background:${isBasicEnabled ? "#2e9e44" : "var(--button-bg)"}; color:${isBasicEnabled ? "#fff" : "var(--text-color)"}; border:1px solid var(--border-color); line-height:1.4;">basic: ${isBasicEnabled ? "ON" : "OFF"}</button>
+                  <button type="button" class="ciBarToggleDetailed" title="Click to toggle detailed context info auto-updates" style="border:none; border-radius:100px; padding:1px 7px; font-size:0.7rem; font-weight:600; cursor:pointer; background:${isDetailedEnabled ? "#2e9e44" : "var(--button-bg)"}; color:${isDetailedEnabled ? "#fff" : "var(--text-color)"}; border:1px solid var(--border-color); line-height:1.4;">detailed: ${isDetailedEnabled ? "ON" : "OFF"}</button>
                   <span id="contextInfoLastUpdatedEl" style="opacity:0.6;"></span>
                 </div>
                 <div id="contextInfoRead" style="display:block;">
@@ -6001,6 +7147,15 @@ window.maxMessagesButtonModify = maxMessagesButtonModify;
         };
         updateContextInfoCollapsedState();
 
+        document.querySelector(".ciBarToggleBasic")?.addEventListener("click", function(e) {
+          e.stopPropagation();
+          if (window.toggleContextInfoHandler) window.toggleContextInfoHandler("basic");
+        });
+        document.querySelector(".ciBarToggleDetailed")?.addEventListener("click", function(e) {
+          e.stopPropagation();
+          if (window.toggleContextInfoHandler) window.toggleContextInfoHandler("detailed");
+        });
+
         // PERCHANCE EDIT: auto-grow the edit textarea to fit its content (no scroll)
         let contextInfoEditTextarea = document.querySelector("#contextInfoEdit textarea");
         let autoResizeContextInfoTextarea = function() {
@@ -6018,7 +7173,8 @@ window.maxMessagesButtonModify = maxMessagesButtonModify;
           }, 60000);
         }
 
-        document.getElementById('contextInfoToggleBar').addEventListener('click', function () {
+        document.getElementById('contextInfoToggleBar').addEventListener('click', function (e) {
+          if (e.target.closest(".ciBarToggleBasic") || e.target.closest(".ciBarToggleDetailed")) return;
           contextInfoCollapsed = !contextInfoCollapsed;
           updateContextInfoCollapsedState();
         });
@@ -6091,7 +7247,23 @@ window.maxMessagesButtonModify = maxMessagesButtonModify;
           // Switch back to read mode
           updateContextInfoCollapsedState();
         });
+      } else {
+        const barBasic = $.messageFeed.querySelector(".ciBarToggleBasic");
+        const barDetailed = $.messageFeed.querySelector(".ciBarToggleDetailed");
+        if (barBasic) {
+          barBasic.style.background = isBasicEnabled ? "#2e9e44" : "var(--button-bg)";
+          barBasic.style.color = isBasicEnabled ? "#fff" : "var(--text-color)";
+          barBasic.textContent = `basic: ${isBasicEnabled ? "ON" : "OFF"}`;
+        }
+        if (barDetailed) {
+          barDetailed.style.background = isDetailedEnabled ? "#2e9e44" : "var(--button-bg)";
+          barDetailed.style.color = isDetailedEnabled ? "#fff" : "var(--text-color)";
+          barDetailed.textContent = `detailed: ${isDetailedEnabled ? "ON" : "OFF"}`;
+        }
       }
+    } else {
+      const existingBar = $.messageFeed.querySelector("#messageFeedTopContextInfo");
+      if (existingBar) existingBar.remove();
     }
 
     if(messages.length > displayedMessages.length) {
@@ -7935,6 +9107,9 @@ fitMessagesInContextMethod: "dropOld",
       iconSpan.innerHTML = `<span style="color:${iconColor}; display:inline-flex; align-items:center; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.15));" title="${tooltip.replace(/"/g, '&quot;')}">${altIcon}</span>`;
       iconSpan.title = tooltip;
     }
+    if (typeof updateThreadModelOptionButton === "function") {
+      updateThreadModelOptionButton();
+    }
   }
   window.updateSendButtonProviderIcon = updateSendButtonProviderIcon;
 
@@ -7969,6 +9144,16 @@ fitMessagesInContextMethod: "dropOld",
     }
     document.querySelectorAll(".settingsTabs button").forEach(b => b.classList.remove("active"));
     if(btn) btn.classList.add("active");
+    if(tab === "ai") {
+      setTimeout(() => {
+        if(window.__renderFavoriteModelsChips) window.__renderFavoriteModelsChips();
+        if(window.__renderRecentModelsChips) window.__renderRecentModelsChips();
+        const modelInp = document.querySelector('input[data-spec-key="pfaccModel"]') || document.querySelector('[data-spec-key="pfaccModel"] input');
+        if(modelInp && window.__updateActiveModelMetadataCard) {
+          window.__updateActiveModelMetadataCard(modelInp.value, "pfaccActiveModelInfo");
+        }
+      }, 50);
+    }
   };
 
   // ── PERCHANCE EDIT: AI Provider model fetcher & search helpers ──
@@ -8000,7 +9185,10 @@ fitMessagesInContextMethod: "dropOld",
     }
 
     try {
-      const url = baseUrl.replace(/\/+$/, "") + "/models";
+      let url = baseUrl.replace(/\/+$/, "") + "/models";
+      if (baseUrl.includes("nano-gpt.com") && !url.includes("detailed=")) {
+        url += (url.includes("?") ? "&" : "?") + "detailed=true";
+      }
       const headers = {};
       if (apiKey) headers["Authorization"] = "Bearer " + apiKey;
 
@@ -8027,11 +9215,37 @@ fitMessagesInContextMethod: "dropOld",
         }
       }
 
-      const models = rawList.map(m => {
-        if (typeof m === "string") return m;
-        if (m && typeof m === "object") return (m.id || m.name || m.model || "");
-        return "";
-      }).filter(Boolean);
+      const models = [];
+      rawList.forEach(m => {
+        let id = "";
+        let name = "";
+        let description = "";
+        let contextLength = null;
+        let created = null;
+
+        if (typeof m === "string") {
+          id = m.trim();
+        } else if (m && typeof m === "object") {
+          id = (m.id || m.name || m.model || "").toString().trim();
+          name = (m.name || "").toString().trim();
+          description = (m.description || m.desc || m.summary || "").toString().trim();
+          contextLength = m.context_length || m.context_window || m.max_context_length || m.max_tokens_context || m.contextTokens || null;
+          created = m.created || m.created_at || m.modified_at || m.createdAt || null;
+        }
+
+        if (id) {
+          models.push(id);
+          window.__cachedModelMetadata[id] = {
+            id,
+            name: name || id,
+            description,
+            contextLength: contextLength ? Number(contextLength) : null,
+            created
+          };
+          window.__cachedModelMetadata[id.toLowerCase()] = window.__cachedModelMetadata[id];
+        }
+      });
+      saveModelMetadataLocalStorage();
 
       models.sort((a, b) => a.localeCompare(b));
 
@@ -8047,7 +9261,7 @@ fitMessagesInContextMethod: "dropOld",
         window.__cachedFetchedModels = models;
         if (statusEl) {
           statusEl.style.color = "#2e9e44";
-          statusEl.textContent = `✓ Loaded ${models.length} models. Type to filter or pick one.`;
+          statusEl.textContent = `✓ Loaded ${models.length} models with metadata. Type to filter or pick one.`;
         }
         if (window.showToast) window.showToast(`Found ${models.length} models!`, { type: "success" });
         if (modelInput && !modelInput.value && models.length > 0) {
@@ -8056,6 +9270,9 @@ fitMessagesInContextMethod: "dropOld",
         }
         if (window.__updateModelSearchDropdown) {
           window.__updateModelSearchDropdown();
+        }
+        if (window.__renderRecentModelsChips) {
+          window.__renderRecentModelsChips();
         }
       }
     } catch (e) {
@@ -8075,6 +9292,9 @@ fitMessagesInContextMethod: "dropOld",
     const input = document.querySelector('input[data-spec-key="pfaccModel"]') || document.querySelector('[data-spec-key="pfaccModel"] input');
     const dropdownEl = document.getElementById("pfaccModelSearchResults");
     if (!input || !dropdownEl) return;
+    if (window.__updateActiveModelMetadataCard) {
+      window.__updateActiveModelMetadataCard(input.value, "pfaccActiveModelInfo");
+    }
     const list = window.__cachedFetchedModels || [];
     if (list.length === 0) {
       dropdownEl.style.display = "none";
@@ -8089,7 +9309,14 @@ fitMessagesInContextMethod: "dropOld",
     }
     dropdownEl.innerHTML = matched.slice(0, 40).map(m => {
       const safe = m.replace(/"/g, '&quot;').replace(/'/g, "\\'");
-      return `<div onclick="window.__selectAiModel('${safe}')" style="padding:0.35rem 0.6rem; font-size:0.8rem; cursor:pointer; border-bottom:1px solid var(--border-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; transition:background var(--transition);" onmouseover="this.style.background='var(--box-color-hover)'" onmouseout="this.style.background='none'">${safe}</div>`;
+      const meta = getModelMetadata(m);
+      const tooltip = meta ? formatModelTooltip(meta).replace(/"/g, '&quot;') : safe;
+      const ctxBadge = meta && meta.contextLength ? `<span style="font-size:0.7rem; opacity:0.75; background:rgba(127,127,127,0.15); padding:1px 5px; border-radius:3px;">${formatModelTokens(meta.contextLength)}</span>` : "";
+      const dtBadge = meta && meta.created ? `<span style="font-size:0.7rem; opacity:0.6;">${formatModelDate(meta.created)}</span>` : "";
+      return `<div onclick="window.__selectAiModel('${safe}')" title="${tooltip}" style="padding:0.35rem 0.6rem; font-size:0.8rem; cursor:pointer; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; gap:0.5rem; transition:background var(--transition);" onmouseover="this.style.background='var(--box-color-hover)'" onmouseout="this.style.background='none'">
+        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:500;">${safe}</span>
+        <span style="display:flex; align-items:center; gap:0.35rem; flex-shrink:0;">${ctxBadge} ${dtBadge}</span>
+      </div>`;
     }).join("");
     dropdownEl.style.display = "block";
   };
@@ -8102,6 +9329,563 @@ fitMessagesInContextMethod: "dropOld",
     }
     const dropdownEl = document.getElementById("pfaccModelSearchResults");
     if (dropdownEl) dropdownEl.style.display = "none";
+    if (window.__updateActiveModelMetadataCard) {
+      window.__updateActiveModelMetadataCard(modelName, "pfaccActiveModelInfo");
+    }
+    recordRecentAiModel(modelName);
+    if (window.__renderRecentModelsChips) {
+      window.__renderRecentModelsChips();
+    }
+    if (window.__renderFavoriteModelsChips) {
+      window.__renderFavoriteModelsChips();
+    }
+  };
+
+  function updateActiveModelMetadataCard(modelId, targetEl) {
+    const ctn = typeof targetEl === "string" ? document.getElementById(targetEl) : targetEl;
+    if (!ctn) return;
+    const meta = getModelMetadata(modelId);
+    if (!meta || (!meta.contextLength && !meta.created && !meta.description)) {
+      ctn.innerHTML = "";
+      ctn.style.display = "none";
+      return;
+    }
+    ctn.style.display = "block";
+    const pills = [];
+    if (meta.contextLength) {
+      pills.push(`<span style="background:rgba(59,130,246,0.12); color:#2563eb; padding:0.12rem 0.45rem; border-radius:4px; font-weight:600; font-size:0.75rem;">${faIcon("ruler") || "📏"} Context: ${formatModelTokens(meta.contextLength)} (${Number(meta.contextLength).toLocaleString()})</span>`);
+    }
+    if (meta.created) {
+      const dt = formatModelDate(meta.created);
+      if (dt) {
+        pills.push(`<span style="background:rgba(16,185,129,0.12); color:#059669; padding:0.12rem 0.45rem; border-radius:4px; font-weight:600; font-size:0.75rem;">${faIcon("calendar") || "📅"} Added: ${dt}</span>`);
+      }
+    }
+    let descHtml = meta.description ? `<div style="margin-top:0.25rem; font-size:0.75rem; opacity:0.85; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;" title="${meta.description.replace(/"/g, '&quot;')}">${sanitizeHtml(meta.description)}</div>` : "";
+    ctn.innerHTML = `
+      <div style="margin-top:0.35rem; padding:0.4rem 0.55rem; background:var(--box-color, rgba(127,127,127,0.06)); border:1px solid var(--border-color); border-radius:var(--border-radius-sm);">
+        <div style="display:flex; flex-wrap:wrap; gap:0.35rem; align-items:center;">
+          ${pills.join("")}
+        </div>
+        ${descHtml}
+      </div>
+    `;
+  }
+  window.__updateActiveModelMetadataCard = updateActiveModelMetadataCard;
+
+  window.__renderFavoriteModelsChips = async function(containerId = "pfaccFavoriteModelsCtn", onSelectFn = "window.__selectAiModel") {
+    const ctn = typeof containerId === "string" ? document.getElementById(containerId) : containerId;
+    if (!ctn) return;
+    const favorites = await getFavoriteAiModels();
+    if (!favorites || favorites.length === 0) {
+      ctn.innerHTML = "";
+      ctn.style.display = "none";
+      return;
+    }
+    ctn.style.display = "flex";
+    const chipsHtml = favorites.slice(0, 10).map(f => {
+      const modelName = typeof f === "string" ? f : f.model;
+      const safe = modelName.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+      const meta = getModelMetadata(modelName);
+      const tooltip = meta ? formatModelTooltip(meta).replace(/"/g, '&quot;') : `Favorite model: ${safe}`;
+      const contextPill = meta && meta.contextLength ? `<span style="opacity:0.65; font-size:0.68rem; margin-left:0.15rem;">(${formatModelTokens(meta.contextLength)})</span>` : "";
+      return `<div style="display:inline-flex; align-items:center; border:1px solid rgba(245,159,0,0.4); border-radius:100px; background:rgba(245,159,0,0.08); max-width:230px; overflow:hidden; transition:all var(--transition);">
+        <button type="button" onclick="${onSelectFn}('${safe}')" title="${tooltip}" style="border:none; background:transparent; color:var(--text-color); cursor:pointer; display:flex; align-items:center; gap:0.25rem; padding:0.18rem 0.35rem 0.18rem 0.45rem; font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          <span style="color:#f59f00; display:flex; align-items:center; font-size:0.8rem;">★</span>
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;">${safe}</span>
+          ${contextPill}
+        </button>
+        <button type="button" onclick="event.stopPropagation(); window.toggleFavoriteAiModel('${safe}').then(() => { if(window.__renderFavoriteModelsChips) window.__renderFavoriteModelsChips(); if(window.__renderRecentModelsChips) window.__renderRecentModelsChips(); });" title="Remove from favorites" style="border:none; background:transparent; color:#f59f00; opacity:0.6; cursor:pointer; padding:0.18rem 0.45rem 0.18rem 0.15rem; font-size:0.75rem; line-height:1;" onmouseover="this.style.opacity='1'; this.style.color='#ef4444';" onmouseout="this.style.opacity='0.6'; this.style.color='#f59f00';">✕</button>
+      </div>`;
+    }).join("");
+    ctn.innerHTML = `<span style="font-size:0.72rem; color:#f59f00; font-weight:600; margin-right:0.2rem; display:flex; align-items:center; gap:0.15rem;">★ Favorites:</span>` + chipsHtml;
+  };
+
+  window.__renderRecentModelsChips = async function(containerId = "pfaccRecentModelsCtn", onSelectFn = "window.__selectAiModel") {
+    const ctn = typeof containerId === "string" ? document.getElementById(containerId) : containerId;
+    if (!ctn) return;
+    const recents = await getRecentAiModels();
+    if (!recents || recents.length === 0) {
+      ctn.innerHTML = "";
+      ctn.style.display = "none";
+      return;
+    }
+    ctn.style.display = "flex";
+    const chipsHtml = recents.slice(0, 8).map(r => {
+      const modelName = typeof r === "string" ? r : r.model;
+      const safe = modelName.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+      const meta = getModelMetadata(modelName);
+      const tooltip = meta ? formatModelTooltip(meta).replace(/"/g, '&quot;') : `Recently used model: ${safe}`;
+      const contextPill = meta && meta.contextLength ? `<span style="opacity:0.65; font-size:0.68rem; margin-left:0.15rem;">(${formatModelTokens(meta.contextLength)})</span>` : "";
+      const isFav = isFavoriteAiModelSync(modelName);
+      return `<div style="display:inline-flex; align-items:center; border:1px solid var(--border-color); border-radius:100px; background:var(--button-bg); max-width:230px; overflow:hidden; transition:all var(--transition);">
+        <button type="button" onclick="${onSelectFn}('${safe}')" title="${tooltip}" style="border:none; background:transparent; color:var(--text-color); cursor:pointer; display:flex; align-items:center; gap:0.25rem; padding:0.18rem 0.35rem 0.18rem 0.45rem; font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+          <span style="opacity:0.6; display:flex; align-items:center;">${faIcon("clock") || "🕒"}</span>
+          <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safe}</span>
+          ${contextPill}
+        </button>
+        <button type="button" onclick="event.stopPropagation(); window.toggleFavoriteAiModel('${safe}').then(() => { if(window.__renderFavoriteModelsChips) window.__renderFavoriteModelsChips(); if(window.__renderRecentModelsChips) window.__renderRecentModelsChips(); });" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}" style="border:none; background:transparent; cursor:pointer; padding:0.18rem 0.25rem; font-size:0.8rem; color:${isFav ? '#f59f00' : 'var(--text-color)'}; opacity:${isFav ? '1' : '0.35'}; line-height:1;">
+          ${isFav ? "★" : "☆"}
+        </button>
+        <button type="button" onclick="event.stopPropagation(); window.removeRecentAiModel('${safe}').then(() => { if(window.__renderRecentModelsChips) window.__renderRecentModelsChips(); });" title="Remove from recent list" style="border:none; background:transparent; color:var(--text-color); opacity:0.45; cursor:pointer; padding:0.18rem 0.45rem 0.18rem 0.15rem; font-size:0.75rem; line-height:1;" onmouseover="this.style.opacity='1'; this.style.color='#ef4444';" onmouseout="this.style.opacity='0.45'; this.style.color='var(--text-color)';">
+          ✕
+        </button>
+      </div>`;
+    }).join("");
+    ctn.innerHTML = `<span style="font-size:0.72rem; opacity:0.7; font-weight:600; margin-right:0.2rem; display:flex; align-items:center;">Recent:</span>` + chipsHtml;
+  };
+
+  async function updateThreadModelOptionButton() {
+    const btn = document.getElementById("threadCurrentModelButton");
+    if (!btn) return;
+    const cfg = window.pfaccAiProvider ? window.pfaccAiProvider.getConfigSync() : { provider: "perchance" };
+    if (!cfg || !cfg.provider || cfg.provider === "perchance") {
+      btn.style.display = "none";
+      return;
+    }
+    const currentModel = (cfg.model || "").trim() || "default";
+    const providerLabel = window.pfaccAiProvider?.PROVIDER_PRESETS?.[cfg.provider]?.label || cfg.provider;
+    const meta = getModelMetadata(currentModel);
+    const tooltip = meta ? formatModelTooltip(meta) : `Active model: ${currentModel} (${providerLabel}). Click to switch model.`;
+    btn.style.display = "flex";
+    btn.style.alignItems = "center";
+    btn.style.gap = "0.35rem";
+    btn.style.maxWidth = "280px";
+    btn.style.overflow = "hidden";
+    btn.innerHTML = `${faIcon("microchip") || "⚡"} <span style="flex-shrink:0;">model:</span> <span class="threadCurrentModelName" style="font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${sanitizeHtml(currentModel)}</span>`;
+    btn.title = tooltip;
+  }
+  window.updateThreadModelOptionButton = updateThreadModelOptionButton;
+
+  // ── PERCHANCE EDIT: Quick Model Switcher Modal (In-Chat Options) ──
+  window.openQuickModelSwitcherModal = async function() {
+    const cfg = window.pfaccAiProvider ? window.pfaccAiProvider.getConfigSync() : { provider: "perchance" };
+    if (!cfg || !cfg.provider || cfg.provider === "perchance") {
+      showToast("Currently using Perchance built-in AI. Open Settings to configure alternative providers.");
+      return;
+    }
+
+    const providerKey = cfg.provider;
+    const preset = window.pfaccAiProvider?.PROVIDER_PRESETS?.[providerKey] || {};
+    const providerLabel = preset.label || providerKey;
+    const currentModel = (cfg.model || "").trim() || (preset.defaultModel || "default");
+
+    let rootEl = document.createElement("div");
+    rootEl.className = "quickModelSwitcherModalRoot";
+    rootEl.style.cssText = "display:flex; flex-direction:column; gap:0.65rem; text-align:left; color:var(--text-color); font-size:0.85rem;";
+
+    // Header
+    let headerBox = document.createElement("div");
+    headerBox.style.cssText = "display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-color); padding-bottom:0.5rem;";
+    headerBox.innerHTML = `
+      <div>
+        <div style="font-size:1.05rem; font-weight:700; display:flex; align-items:center; gap:0.4rem;">
+          ${faIcon("bolt") || "⚡"} Quick Model Switcher
+        </div>
+        <div style="font-size:0.75rem; opacity:0.75; margin-top:0.1rem;">
+          Provider: <b>${sanitizeHtml(providerLabel)}</b>
+        </div>
+      </div>
+      <button type="button" class="quickFetchModelsBtn" style="padding:0.3rem 0.65rem; font-size:0.75rem; background:var(--button-bg); border:1px solid var(--border-color); border-radius:var(--border-radius-sm); color:var(--text-color); cursor:pointer; display:flex; align-items:center; gap:0.3rem;" title="Fetch latest models from endpoint">
+        ${faIcon("cloud-arrow-down") || "🔄"} Fetch Models
+      </button>
+    `;
+    rootEl.appendChild(headerBox);
+
+    // Active model box
+    let activeCard = document.createElement("div");
+    activeCard.style.cssText = "background:var(--box-color, rgba(127,127,127,0.08)); border:1px solid var(--border-color); border-radius:var(--border-radius); padding:0.55rem 0.75rem;";
+    function renderActiveCard() {
+      const activeCfg = window.pfaccAiProvider ? window.pfaccAiProvider.getConfigSync() : cfg;
+      const activeName = (activeCfg.model || "").trim() || (preset.defaultModel || "default");
+      const curMeta = getModelMetadata(activeName);
+      const curContextBadge = curMeta && curMeta.contextLength ? `<span style="background:rgba(59,130,246,0.12); color:#2563eb; padding:0.1rem 0.4rem; border-radius:4px; font-weight:600; font-size:0.72rem;">${faIcon("ruler") || "📏"} ${formatModelTokens(curMeta.contextLength)}</span>` : "";
+      const curDateBadge = curMeta && curMeta.created ? `<span style="background:rgba(16,185,129,0.12); color:#059669; padding:0.1rem 0.4rem; border-radius:4px; font-weight:600; font-size:0.72rem;">${faIcon("calendar") || "📅"} ${formatModelDate(curMeta.created)}</span>` : "";
+      const curDesc = curMeta && curMeta.description ? `<div style="font-size:0.74rem; opacity:0.8; margin-top:0.25rem; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;" title="${curMeta.description.replace(/"/g, '&quot;')}">${sanitizeHtml(curMeta.description)}</div>` : "";
+      const isCurFav = isFavoriteAiModelSync(activeName);
+      const curFavBtn = `
+        <button type="button" class="quickActiveFavoriteBtn" title="${isCurFav ? 'Remove from favorites' : 'Add to favorites'}" style="padding:0.12rem 0.45rem; font-size:0.75rem; border-radius:4px; border:1px solid ${isCurFav ? 'rgba(245,159,0,0.5)' : 'var(--border-color)'}; background:${isCurFav ? 'rgba(245,159,0,0.12)' : 'var(--button-bg)'}; color:${isCurFav ? '#f59f00' : 'var(--text-color)'}; cursor:pointer; display:flex; align-items:center; gap:0.25rem;">
+          <span>${isCurFav ? "★" : "☆"}</span> ${isCurFav ? "Favorited" : "Favorite"}
+        </button>
+      `;
+      activeCard.innerHTML = `
+        <div style="font-size:0.72rem; opacity:0.65; font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Current Active Model</div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem; margin-top:0.15rem;">
+          <span style="font-weight:700; font-size:0.95rem; color:var(--link-color); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${sanitizeHtml(activeName)}</span>
+          <div style="display:flex; align-items:center; gap:0.35rem; flex-shrink:0;">
+            ${curContextBadge}
+            ${curDateBadge}
+            ${curFavBtn}
+          </div>
+        </div>
+        ${curDesc}
+      `;
+      activeCard.querySelector(".quickActiveFavoriteBtn")?.addEventListener("click", async () => {
+        await toggleFavoriteAiModel(activeName, providerKey);
+        renderActiveCard();
+        await updateFavoriteChips();
+        await updateRecentChips();
+        renderList();
+      });
+    }
+    renderActiveCard();
+    rootEl.appendChild(activeCard);
+
+    // Favorites section
+    let favoritesContainer = document.createElement("div");
+    favoritesContainer.style.cssText = "display:flex; flex-direction:column; gap:0.25rem;";
+    let favoritesLabel = document.createElement("div");
+    favoritesLabel.style.cssText = "font-size:0.75rem; font-weight:600; opacity:0.85; color:#f59f00; display:flex; align-items:center; gap:0.3rem;";
+    favoritesLabel.innerHTML = `<span>★</span> Favorite Models:`;
+    let favoritesChipsCtn = document.createElement("div");
+    favoritesChipsCtn.style.cssText = "display:flex; flex-wrap:wrap; gap:0.35rem;";
+    favoritesContainer.appendChild(favoritesLabel);
+    favoritesContainer.appendChild(favoritesChipsCtn);
+    rootEl.appendChild(favoritesContainer);
+
+    async function updateFavoriteChips() {
+      const favs = await getFavoriteAiModels();
+      if (!favs || favs.length === 0) {
+        favoritesContainer.style.display = "none";
+        return;
+      }
+      favoritesContainer.style.display = "flex";
+      favoritesChipsCtn.innerHTML = favs.slice(0, 10).map(f => {
+        const m = typeof f === "string" ? f : f.model;
+        const safe = m.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        const meta = getModelMetadata(m);
+        const tooltip = meta ? formatModelTooltip(meta).replace(/"/g, '&quot;') : `Switch to ${safe}`;
+        const ctxBadge = meta && meta.contextLength ? `<span style="opacity:0.65; font-size:0.68rem; margin-left:0.15rem;">(${formatModelTokens(meta.contextLength)})</span>` : "";
+        return `
+          <div class="quickFavChipWrapper" style="display:inline-flex; align-items:center; border:1px solid rgba(245,159,0,0.4); border-radius:100px; background:rgba(245,159,0,0.08); max-width:240px; overflow:hidden; transition:all var(--transition);">
+            <button type="button" class="quickFavChip" data-model="${safe}" title="${tooltip}" style="border:none; background:transparent; color:var(--text-color); cursor:pointer; display:flex; align-items:center; gap:0.25rem; padding:0.2rem 0.35rem 0.2rem 0.5rem; font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              <span style="color:#f59f00; display:flex; align-items:center;">★</span>
+              <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;">${safe}</span>
+              ${ctxBadge}
+            </button>
+            <button type="button" class="quickFavRemoveBtn" data-model="${safe}" title="Remove ${safe} from favorites" style="border:none; background:transparent; color:#f59f00; opacity:0.6; cursor:pointer; padding:0.2rem 0.45rem 0.2rem 0.15rem; font-size:0.75rem; display:flex; align-items:center; line-height:1;" onmouseover="this.style.opacity='1'; this.style.color='#ef4444';" onmouseout="this.style.opacity='0.6'; this.style.color='#f59f00';">✕</button>
+          </div>
+        `;
+      }).join("");
+
+      favoritesChipsCtn.querySelectorAll(".quickFavChip").forEach(b => {
+        b.addEventListener("click", () => doSwitch(b.dataset.model));
+      });
+      favoritesChipsCtn.querySelectorAll(".quickFavRemoveBtn").forEach(b => {
+        b.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await toggleFavoriteAiModel(b.dataset.model, providerKey);
+          renderActiveCard();
+          await updateFavoriteChips();
+          await updateRecentChips();
+          renderList();
+        });
+      });
+    }
+    await updateFavoriteChips();
+
+    // Recently used section
+    let recentsContainer = document.createElement("div");
+    recentsContainer.style.cssText = "display:flex; flex-direction:column; gap:0.25rem;";
+    let recentsLabel = document.createElement("div");
+    recentsLabel.style.cssText = "font-size:0.75rem; font-weight:600; opacity:0.8;";
+    recentsLabel.textContent = "Recently Used Models:";
+    let recentsChipsCtn = document.createElement("div");
+    recentsChipsCtn.style.cssText = "display:flex; flex-wrap:wrap; gap:0.35rem;";
+    recentsContainer.appendChild(recentsLabel);
+    recentsContainer.appendChild(recentsChipsCtn);
+    rootEl.appendChild(recentsContainer);
+
+    async function updateRecentChips() {
+      const recents = await getRecentAiModels();
+      if (!recents || recents.length === 0) {
+        recentsContainer.style.display = "none";
+        return;
+      }
+      recentsContainer.style.display = "flex";
+      recentsChipsCtn.innerHTML = recents.slice(0, 8).map(r => {
+        const m = typeof r === "string" ? r : r.model;
+        const safe = m.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        const meta = getModelMetadata(m);
+        const tooltip = meta ? formatModelTooltip(meta).replace(/"/g, '&quot;') : `Switch to ${safe}`;
+        const ctxBadge = meta && meta.contextLength ? `<span style="opacity:0.65; font-size:0.68rem; margin-left:0.15rem;">(${formatModelTokens(meta.contextLength)})</span>` : "";
+        const isFav = isFavoriteAiModelSync(m);
+        return `
+          <div class="quickRecentChipWrapper" style="display:inline-flex; align-items:center; border:1px solid var(--border-color); border-radius:100px; background:var(--button-bg); max-width:240px; overflow:hidden; transition:all var(--transition);">
+            <button type="button" class="quickRecentChip" data-model="${safe}" title="${tooltip}" style="border:none; background:transparent; color:var(--text-color); cursor:pointer; display:flex; align-items:center; gap:0.25rem; padding:0.2rem 0.35rem 0.2rem 0.5rem; font-size:0.75rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              <span style="opacity:0.6; display:flex; align-items:center;">${faIcon("clock") || "🕒"}</span>
+              <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${safe}</span>
+              ${ctxBadge}
+            </button>
+            <button type="button" class="quickRecentFavBtn" data-model="${safe}" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}" style="border:none; background:transparent; cursor:pointer; padding:0.2rem 0.25rem; font-size:0.8rem; color:${isFav ? '#f59f00' : 'var(--text-color)'}; opacity:${isFav ? '1' : '0.35'}; line-height:1;">
+              ${isFav ? "★" : "☆"}
+            </button>
+            <button type="button" class="quickRecentRemoveBtn" data-model="${safe}" title="Remove ${safe} from recent list" style="border:none; background:transparent; color:var(--text-color); opacity:0.45; cursor:pointer; padding:0.2rem 0.45rem 0.2rem 0.15rem; font-size:0.75rem; display:flex; align-items:center; line-height:1;" onmouseover="this.style.opacity='1'; this.style.color='#ef4444';" onmouseout="this.style.opacity='0.45'; this.style.color='var(--text-color)';">
+              ✕
+            </button>
+          </div>
+        `;
+      }).join("");
+
+      recentsChipsCtn.querySelectorAll(".quickRecentChip").forEach(b => {
+        b.addEventListener("click", () => doSwitch(b.dataset.model));
+      });
+      recentsChipsCtn.querySelectorAll(".quickRecentFavBtn").forEach(b => {
+        b.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await toggleFavoriteAiModel(b.dataset.model, providerKey);
+          renderActiveCard();
+          await updateFavoriteChips();
+          await updateRecentChips();
+          renderList();
+        });
+      });
+      recentsChipsCtn.querySelectorAll(".quickRecentRemoveBtn").forEach(b => {
+        b.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await removeRecentAiModel(b.dataset.model);
+          await updateRecentChips();
+          if (window.__renderRecentModelsChips) window.__renderRecentModelsChips();
+        });
+      });
+    }
+    await updateRecentChips();
+
+    // Search and filter input
+    let searchBox = document.createElement("div");
+    searchBox.style.cssText = "position:relative;";
+    let searchInput = document.createElement("input");
+    searchInput.type = "text";
+    searchInput.placeholder = "Search available models or type a custom model ID...";
+    searchInput.style.cssText = "width:100%; padding:0.45rem 0.65rem; border-radius:var(--border-radius-sm); border:1px solid var(--border-color); background:var(--textarea-bg, var(--background)); color:var(--text-color); font-size:0.85rem;";
+    searchBox.appendChild(searchInput);
+    rootEl.appendChild(searchBox);
+
+    // Custom model action button
+    let customModelBtn = document.createElement("button");
+    customModelBtn.type = "button";
+    customModelBtn.style.cssText = "display:none; padding:0.4rem 0.65rem; font-size:0.8rem; background:rgba(59,130,246,0.1); border:1px solid var(--link-color); border-radius:var(--border-radius-sm); color:var(--link-color); cursor:pointer; font-weight:600; text-align:left;";
+    rootEl.appendChild(customModelBtn);
+
+    // Scrollable model list
+    let listContainer = document.createElement("div");
+    listContainer.style.cssText = "max-height:220px; overflow-y:auto; border:1px solid var(--border-color); border-radius:var(--border-radius-sm); background:var(--background); display:flex; flex-direction:column;";
+    rootEl.appendChild(listContainer);
+
+    let statusEl = document.createElement("div");
+    statusEl.style.cssText = "font-size:0.75rem; min-height:1rem; opacity:0.8;";
+    rootEl.appendChild(statusEl);
+
+    async function doSwitch(newModel) {
+      if (!newModel || typeof newModel !== "string") return;
+      const target = newModel.trim();
+      if (!target) return;
+
+      try {
+        await window.pfaccAiProvider.saveConfig({ model: target });
+        await recordRecentAiModel(target, providerKey);
+        updateSendButtonProviderIcon();
+        if (typeof window.updateThreadModelOptionButton === "function") {
+          window.updateThreadModelOptionButton();
+        }
+        showToast(`⚡ Switched model to: ${target}`, { type: "success" });
+
+        const closeBtn = rootEl.closest(".window")?.querySelector(".closeButton") || document.querySelector(".window .closeButton");
+        if (closeBtn) closeBtn.click();
+      } catch(e) {
+        console.error("Failed to switch model:", e);
+        showToast("Failed to switch model: " + e.message, { type: "error" });
+      }
+    }
+
+    function renderList() {
+      const q = (searchInput.value || "").toLowerCase().trim();
+      let pool = window.__cachedFetchedModels || [];
+      if (pool.length === 0 && preset.defaultModel) {
+        pool = [preset.defaultModel];
+      }
+
+      let matched = q ? pool.filter(m => m.toLowerCase().includes(q)) : pool;
+
+      // Update custom model button
+      if (q && !pool.some(m => m.toLowerCase() === q)) {
+        customModelBtn.style.display = "block";
+        customModelBtn.innerHTML = `${faIcon("arrow-right") || "➔"} Use custom model: <b>${sanitizeHtml(searchInput.value.trim())}</b>`;
+        customModelBtn.onclick = () => doSwitch(searchInput.value.trim());
+      } else {
+        customModelBtn.style.display = "none";
+      }
+
+      if (matched.length === 0) {
+        listContainer.innerHTML = `<div style="padding:0.8rem; text-align:center; opacity:0.6; font-size:0.8rem;">No matching models found. Use the custom model button above or fetch models.</div>`;
+        return;
+      }
+
+      const activeCfg = window.pfaccAiProvider ? window.pfaccAiProvider.getConfigSync() : cfg;
+      const activeName = (activeCfg.model || "").trim() || (preset.defaultModel || "default");
+
+      listContainer.innerHTML = matched.slice(0, 80).map(m => {
+        const safe = m.replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        const meta = getModelMetadata(m);
+        const tooltip = meta ? formatModelTooltip(meta).replace(/"/g, '&quot;') : safe;
+        const ctxBadge = meta && meta.contextLength ? `<span style="background:rgba(59,130,246,0.12); color:#2563eb; font-size:0.68rem; padding:1px 5px; border-radius:3px; font-weight:600;">${formatModelTokens(meta.contextLength)}</span>` : "";
+        const dtBadge = meta && meta.created ? `<span style="font-size:0.68rem; opacity:0.65;">${formatModelDate(meta.created)}</span>` : "";
+        const isCur = m.toLowerCase() === activeName.toLowerCase();
+        const isFav = isFavoriteAiModelSync(m);
+        return `
+          <div class="quickModelRow" data-model="${safe}" title="${tooltip}" style="padding:0.4rem 0.65rem; border-bottom:1px solid var(--border-color); display:flex; justify-content:space-between; align-items:center; cursor:pointer; gap:0.5rem; background:${isCur ? "rgba(59,130,246,0.08)" : "transparent"}; transition:background var(--transition);">
+            <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:flex; align-items:center; gap:0.35rem;">
+              ${isCur ? `<span style="color:#2e9e44; font-size:0.75rem;">${faIcon("circle-check") || "✓"}</span>` : ""}
+              <span style="font-weight:${isCur ? "700" : "500"}; ${isCur ? "color:var(--link-color);" : ""}">${safe}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.4rem; flex-shrink:0;">
+              ${ctxBadge}
+              ${dtBadge}
+              <button type="button" class="rowFavoriteBtn" data-model="${safe}" title="${isFav ? 'Remove from favorites' : 'Add to favorites'}" style="border:none; background:transparent; cursor:pointer; font-size:0.9rem; padding:0 2px; color:${isFav ? '#f59f00' : 'var(--text-color)'}; opacity:${isFav ? '1' : '0.35'}; line-height:1; transition:all 0.15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='${isFav ? '1' : '0.35'}'">
+                ${isFav ? "★" : "☆"}
+              </button>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      listContainer.querySelectorAll(".quickModelRow").forEach(row => {
+        row.addEventListener("click", (e) => {
+          if (e.target.closest(".rowFavoriteBtn")) return;
+          doSwitch(row.dataset.model);
+        });
+        row.addEventListener("mouseover", () => {
+          row.style.background = "var(--box-color-hover)";
+        });
+        row.addEventListener("mouseout", () => {
+          const isCur = row.dataset.model.toLowerCase() === activeName.toLowerCase();
+          row.style.background = isCur ? "rgba(59,130,246,0.08)" : "transparent";
+        });
+      });
+
+      listContainer.querySelectorAll(".rowFavoriteBtn").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await toggleFavoriteAiModel(btn.dataset.model, providerKey);
+          renderActiveCard();
+          await updateFavoriteChips();
+          await updateRecentChips();
+          renderList();
+        });
+      });
+    }
+
+    searchInput.addEventListener("input", renderList);
+    searchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const q = (searchInput.value || "").trim();
+        if (!q) return;
+        const pool = window.__cachedFetchedModels || [];
+        const exact = pool.find(m => m.toLowerCase() === q.toLowerCase());
+        doSwitch(exact || q);
+      }
+    });
+
+    headerBox.querySelector(".quickFetchModelsBtn").addEventListener("click", async function() {
+      const btn = this;
+      const origHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `${faIcon("spinner") || "⏳"} Fetching...`;
+      statusEl.textContent = "Fetching models from " + (cfg.baseUrl || preset.baseUrl) + " ...";
+      statusEl.style.color = "var(--text-color)";
+
+      try {
+        let fetchUrl = (cfg.baseUrl || preset.baseUrl || "").replace(/\/+$/, "") + "/models";
+        if (fetchUrl.includes("nano-gpt.com") && !fetchUrl.includes("detailed=")) {
+          fetchUrl += (fetchUrl.includes("?") ? "&" : "?") + "detailed=true";
+        }
+        const headers = {};
+        if (cfg.apiKey) headers["Authorization"] = "Bearer " + cfg.apiKey;
+
+        const res = await window.pfaccAiProvider.doFetch(fetchUrl, {
+          method: "GET",
+          headers,
+          signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined,
+        });
+
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        let rawList = [];
+        if (Array.isArray(data.data)) rawList = data.data;
+        else if (Array.isArray(data.models)) rawList = data.models;
+        else if (Array.isArray(data)) rawList = data;
+        else if (data && typeof data === "object") {
+          for (const k of ["data", "models", "result"]) {
+            if (Array.isArray(data[k])) { rawList = data[k]; break; }
+          }
+        }
+
+        const models = [];
+        rawList.forEach(m => {
+          let id = "";
+          let name = "";
+          let description = "";
+          let contextLength = null;
+          let created = null;
+
+          if (typeof m === "string") {
+            id = m.trim();
+          } else if (m && typeof m === "object") {
+            id = (m.id || m.name || m.model || "").toString().trim();
+            name = (m.name || "").toString().trim();
+            description = (m.description || m.desc || m.summary || "").toString().trim();
+            contextLength = m.context_length || m.context_window || m.max_context_length || m.max_tokens_context || m.contextTokens || null;
+            created = m.created || m.created_at || m.modified_at || m.createdAt || null;
+          }
+
+          if (id) {
+            models.push(id);
+            window.__cachedModelMetadata[id] = {
+              id,
+              name: name || id,
+              description,
+              contextLength: contextLength ? Number(contextLength) : null,
+              created
+            };
+            window.__cachedModelMetadata[id.toLowerCase()] = window.__cachedModelMetadata[id];
+          }
+        });
+        saveModelMetadataLocalStorage();
+        models.sort((a, b) => a.localeCompare(b));
+        window.__cachedFetchedModels = models;
+
+        statusEl.textContent = `✓ Fetched ${models.length} models.`;
+        statusEl.style.color = "#2e9e44";
+        renderActiveCard();
+        await updateRecentChips();
+        renderList();
+      } catch(err) {
+        console.error("Fetch models failed:", err);
+        statusEl.textContent = "Failed to fetch models: " + (err.message || err);
+        statusEl.style.color = "#d9534f";
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+      }
+    });
+
+    renderList();
+
+    setTimeout(() => {
+      searchInput.focus();
+    }, 100);
+
+    await prompt2({
+      quickModelContent: {
+        type: "none",
+        html: rootEl
+      }
+    }, {
+      width: "560px",
+      submitButtonText: false,
+      cancelButtonText: "Close"
+    });
   };
 
   // Toggle switch used by the character editor's enable/disable toggles.
@@ -11678,6 +13462,7 @@ fitMessagesInContextMethod: "dropOld",
     }
 
     let id = await db.messages.add(messageObj);
+    if (typeof window.markDataChangedForSync === "function") window.markDataChangedForSync();
     // update the thread's lastMessageTime.
     await db.threads.update(messageObj.threadId, { lastMessageTime: messageObj.creationTime });
 
@@ -15880,6 +17665,20 @@ fitMessagesInContextMethod: "dropOld",
           $.messageInput.value = "";
           let thread = await db.threads.get(threadId);
           if(thread) await openBulkEditShortcutsModal(thread);
+        } else if(message.trim() === "/ci" || message.trim() === "/contextinfo" || message.trim().startsWith("/ci ") || message.trim().startsWith("/contextinfo ")) {
+          $.messageInput.value = "";
+          const parts = message.trim().toLowerCase().split(/\s+/).slice(1);
+          let targetType = "basic";
+          let targetState = null;
+          for(const p of parts) {
+            if(p === "detailed" || p === "detail") targetType = "detailed";
+            else if(p === "basic") targetType = "basic";
+            else if(p === "on" || p === "enable" || p === "yes") targetState = "yes";
+            else if(p === "off" || p === "disable" || p === "no") targetState = "no";
+          }
+          if(window.toggleContextInfoHandler) {
+            await window.toggleContextInfoHandler(targetType, targetState);
+          }
         } else if(message.trim() === "/sum") {
           // OLD SUMMARIES APPROACH:
           // // first ensure summary is up to date:
@@ -18779,6 +20578,12 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
   $.threadOptionsButton.addEventListener("click", async function() {
     if($.threadOptionsPopup.offsetHeight === 0) {
       await updateAutoReplyButtonLabel();
+      if(typeof updateContextInfoButtonLabels === "function") {
+        await updateContextInfoButtonLabels();
+      }
+      if(typeof updateThreadModelOptionButton === "function") {
+        await updateThreadModelOptionButton();
+      }
       showEl($.threadOptionsPopup);
       hideEl($.threadReplyAsCharacterListPopup);
       hideEl($.threadForceLoadCharacterListPopup);
@@ -18869,6 +20674,12 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
     await db.threads.update(thread.id, {userCharacter: thread.userCharacter});
     await renderShortcutButtons(thread);
     hideEl($.threadOptionsPopup);
+  });
+  $.threadCurrentModelButton?.addEventListener("click", function() {
+    hideEl($.threadOptionsPopup);
+    if (typeof window.openQuickModelSwitcherModal === "function") {
+      window.openQuickModelSwitcherModal();
+    }
   });
   $.threadLevelResponseLengthButton.addEventListener("click", async function() {
     hideEl($.threadOptionsPopup);
@@ -19026,6 +20837,114 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
     await updateAutoReplyButtonLabel();
     showToast(`Auto-reply has been ${thread.autoReplyDisabled === true ? "𝗱𝗶𝘀𝗮𝗯𝗹𝗲𝗱" : "𝗲𝗻𝗮𝗯𝗹𝗲𝗱"} for this chat thread.`);
     hideEl($.threadOptionsPopup);
+  });
+
+  async function updateContextInfoButtonLabels() {
+    try {
+      const btnBasic = document.getElementById("toggleContextInfoButton");
+      const btnDetailed = document.getElementById("toggleDetailedContextInfoButton");
+      if (!btnBasic && !btnDetailed) return;
+
+      const thread = await db.threads.get(activeThreadId);
+      if (!thread) return;
+      const character = thread.characterId ? await db.characters.get(thread.characterId) : null;
+
+      const basicEnabled = character?.customData?.contextInfo?.basic?.enabled === "yes";
+      const detailedEnabled = character?.customData?.contextInfo?.detailed?.enabled === "yes";
+
+      if (btnBasic) {
+        btnBasic.innerHTML = `${faIcon("brain") || "🧠"} context info: ${basicEnabled ? "<b>𝗼𝗻</b>" : "𝗼𝗳𝗳"}`;
+        btnBasic.title = basicEnabled ? "Click to disable basic context info auto-updates" : "Click to enable basic context info auto-updates";
+        btnBasic.style.color = basicEnabled ? "#2e9e44" : "inherit";
+      }
+      if (btnDetailed) {
+        btnDetailed.innerHTML = `${faIcon("book-open") || "📖"} detailed context: ${detailedEnabled ? "<b>𝗼𝗻</b>" : "𝗼𝗳𝗳"}`;
+        btnDetailed.title = detailedEnabled ? "Click to disable detailed context info auto-updates" : "Click to enable detailed context info auto-updates";
+        btnDetailed.style.color = detailedEnabled ? "#2e9e44" : "inherit";
+      }
+    } catch(e) {}
+  }
+  window.updateContextInfoButtonLabels = updateContextInfoButtonLabels;
+
+  window.updateContextInfoTopBarPills = function(character) {
+    if (!character) return;
+    const isBasicEnabled = character.customData?.contextInfo?.basic?.enabled === "yes";
+    const isDetailedEnabled = character.customData?.contextInfo?.detailed?.enabled === "yes";
+    const barBasic = document.querySelector("#messageFeedTopContextInfo .ciBarToggleBasic");
+    const barDetailed = document.querySelector("#messageFeedTopContextInfo .ciBarToggleDetailed");
+    if (barBasic) {
+      barBasic.style.background = isBasicEnabled ? "#2e9e44" : "var(--button-bg)";
+      barBasic.style.color = isBasicEnabled ? "#fff" : "var(--text-color)";
+      barBasic.textContent = `basic: ${isBasicEnabled ? "ON" : "OFF"}`;
+    }
+    if (barDetailed) {
+      barDetailed.style.background = isDetailedEnabled ? "#2e9e44" : "var(--button-bg)";
+      barDetailed.style.color = isDetailedEnabled ? "#fff" : "var(--text-color)";
+      barDetailed.textContent = `detailed: ${isDetailedEnabled ? "ON" : "OFF"}`;
+    }
+    if ((isBasicEnabled || isDetailedEnabled) && !document.getElementById("messageFeedTopContextInfo")) {
+      if (typeof renderCurrentMessages === "function") {
+        renderCurrentMessages();
+      }
+    }
+  };
+
+  async function toggleContextInfoHandler(type = "basic", explicitState = null) {
+    try {
+      const thread = await db.threads.get(activeThreadId);
+      if (!thread || !thread.characterId) {
+        showToast("Open a character chat first to toggle context info.");
+        return;
+      }
+      const character = await db.characters.get(thread.characterId);
+      if (!character) {
+        showToast("Character not found.");
+        return;
+      }
+
+      character.customData = character.customData || {};
+      character.customData.contextInfo = character.customData.contextInfo || {};
+      character.customData.contextInfo[type] = character.customData.contextInfo[type] || {};
+
+      const current = character.customData.contextInfo[type].enabled === "yes";
+      let next;
+      if (explicitState === true || explicitState === "yes" || explicitState === "on") {
+        next = "yes";
+      } else if (explicitState === false || explicitState === "no" || explicitState === "off") {
+        next = "no";
+      } else {
+        next = current ? "no" : "yes";
+      }
+      character.customData.contextInfo[type].enabled = next;
+
+      if (next === "yes" && !character.customData.contextInfo[type].prompt) {
+        if (type === "basic") {
+          character.customData.contextInfo.basic.prompt = `Using the previous context information, messages, and other input information, update the context information for the new message. The new message should be integrated with the most recent date, time, and location. The context info includes the character’s status, inventory, and location at the time of this message.\n\nInput Information:\n{{InputInformation}}\n\nPrevious Context Information:\n{{PreviousContextInformation}}\n\nFORMATTING WITH EXAMPLES BELOW:\nContext Update Logic:\nLocation: When a message includes a change of location or notable event, update the character’s current location. If the character moves, store the previous location along with the time and date of departure.\n\nTime of Day: Update the time as appropriate based on the progression of the game world. If no new time is provided, the time progresses automatically based on elapsed messages or events.\n\nExample Context Information Output:\nCurrent Location: [Sub Location], [Location]\nTime of Day: [Time - 5:30 AM]\nDate: [Date - Weekday, Month Day, Year]`;
+        } else {
+          character.customData.contextInfo.detailed.prompt = `Using the previous detailed context information, messages, and other input information, update the detailed context with the latest actions, stats, and any character-specific events. Update any relevant character details such as health, inventory, or status effects. Any new interactions, decisions, or changes in character stats should be reflected in this detailed update.\n\nInput Information:\n{{InputInformation}}\n\nPrevious Detailed Context Information:\n{{PreviousDetailedContextInformation}}\n\nFORMATTING WITH EXAMPLES BELOW:\nExample Detailed Context Information Output:\nCurrent Location Details: The adventurer stands at the city gates of Verdenfell.\n\nStats:\n- Health: [Stat Value]\n- Inventory: [Item, Count]\n- Recent Actions: [Action]`;
+        }
+      }
+
+      await db.characters.update(character.id, { customData: character.customData });
+      if (typeof updateContextInfoButtonLabels === "function") {
+        await updateContextInfoButtonLabels();
+      }
+      if (typeof window.updateContextInfoTopBarPills === "function") {
+        window.updateContextInfoTopBarPills(character);
+      }
+      showToast(`${type === "basic" ? "Basic Context Info" : "Detailed Context Info"}: ${next === "yes" ? "ENABLED (auto-updates on)" : "DISABLED (auto-updates off)"}`, { type: next === "yes" ? "success" : "info" });
+    } catch(e) {
+      console.error("toggleContextInfo error:", e);
+      showToast("Failed to toggle context info: " + e.message, { type: "error" });
+    }
+  }
+  window.toggleContextInfoHandler = toggleContextInfoHandler;
+
+  $.toggleContextInfoButton?.addEventListener("click", async function() {
+    await window.toggleContextInfoHandler("basic");
+  });
+  $.toggleDetailedContextInfoButton?.addEventListener("click", async function() {
+    await window.toggleContextInfoHandler("detailed");
   });
   // ════════════════════════════════════════════════════════════════
   // GLOBAL CHARACTER SPAWNING  (the /spawn command + engine)
@@ -20602,6 +22521,7 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
           <button type="button" onclick="window.__setSettingsTab('chat', this)">${faIcon("comments") || "💬"} Chat & Prompts</button>
           <button type="button" onclick="window.__setSettingsTab('appearance', this)">${faIcon("palette") || "🎨"} Appearance</button>
           <button type="button" onclick="window.__setSettingsTab('memory', this)">${faIcon("brain") || "🧠"} Memory & Lore</button>
+          <button type="button" onclick="window.openGoogleDriveSyncModal()">${faIcon("cloud") || "☁️"} Cloud Sync</button>
           <button type="button" onclick="window.__setSettingsTab('advanced', this)">${faIcon("sliders") || "⚙️"} Advanced</button>
         </div>
         <input type="hidden" data-spec-key="__settingsActiveTab" value="profile">
@@ -20638,6 +22558,7 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
           { value: "openai", content: "OpenAI" },
           { value: "grok", content: "Grok (xAI)" },
           { value: "deepseek", content: "DeepSeek" },
+          { value: "nanogpt", content: "Nano-GPT" },
           { value: "ollama", content: "Ollama (local)" },
           { value: "lmstudio", content: "LM Studio (local)" },
           { value: "custom", content: "Custom (OpenAI-compatible)" },
@@ -20702,7 +22623,7 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
           </div>
           <div style="display:flex; gap:0.4rem; align-items:center;">
             <div style="flex-grow:1; position:relative;">
-              <input data-spec-key="pfaccModel" list="pfaccModelDatalist" value="${sanitizeHtml(pfaccAiCfg.model || "")}" placeholder="e.g. gpt-4o-mini, grok-2-latest, deepseek-chat, llama3.1" autocomplete="off" oninput="if(window.__updateModelSearchDropdown) window.__updateModelSearchDropdown()" onfocus="if(window.__updateModelSearchDropdown) window.__updateModelSearchDropdown()" style="width:100%; border: 1px solid lightgrey; border-radius: 3px; padding: 0.35rem 0.5rem; font-size:0.9rem; background:var(--background); color:var(--text-color);">
+              <input data-spec-key="pfaccModel" list="pfaccModelDatalist" value="${sanitizeHtml(pfaccAiCfg.model || "")}" placeholder="e.g. gpt-4o-mini, grok-2-latest, deepseek-chat, llama3.1" autocomplete="off" oninput="if(window.__updateModelSearchDropdown) window.__updateModelSearchDropdown(); if(window.__updateActiveModelMetadataCard) window.__updateActiveModelMetadataCard(this.value, 'pfaccActiveModelInfo');" onfocus="if(window.__updateModelSearchDropdown) window.__updateModelSearchDropdown(); if(window.__updateActiveModelMetadataCard) window.__updateActiveModelMetadataCard(this.value, 'pfaccActiveModelInfo');" style="width:100%; border: 1px solid lightgrey; border-radius: 3px; padding: 0.35rem 0.5rem; font-size:0.9rem; background:var(--background); color:var(--text-color);">
               <datalist id="pfaccModelDatalist"></datalist>
               <div id="pfaccModelSearchResults" style="display:none; position:absolute; top:100%; left:0; right:0; max-height:160px; overflow-y:auto; background:var(--background); border:1px solid var(--border-color); border-radius:var(--border-radius-sm); box-shadow:0 6px 18px rgba(0,0,0,0.25); z-index:20; margin-top:2px;"></div>
             </div>
@@ -20710,6 +22631,9 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
               ${faIcon("cloud-arrow-down") || "🔍"} Fetch Models
             </button>
           </div>
+          <div id="pfaccFavoriteModelsCtn" style="margin-top:0.35rem; display:none; flex-wrap:wrap; gap:0.35rem; align-items:center;"></div>
+          <div id="pfaccRecentModelsCtn" style="margin-top:0.35rem; display:none; flex-wrap:wrap; gap:0.35rem; align-items:center;"></div>
+          <div id="pfaccActiveModelInfo" style="display:none;"></div>
           <div id="pfaccFetchModelsStatus" style="font-size:0.75rem; margin-top:0.3rem; min-height:1rem;"></div>
         </div>
         `
