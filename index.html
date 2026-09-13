@@ -2333,9 +2333,9 @@ notes to self:
             </div>
             ` : ""}
           </div>
-          <div style="text-align:center; margin-top:1rem; ${opts.cancelButtonText === null ? "" : `display:flex; justify-content:space-between;`}">
+          <div style="text-align:center; margin-top:1rem; ${(opts.cancelButtonText === null || opts.submitButtonText === false || opts.submitButtonText === null) ? "" : `display:flex; justify-content:space-between;`}">
             ${opts.cancelButtonText === null ? "" : `<button class="cancel" style="padding: 0.25rem;">${opts.cancelButtonText ?? "cancel"}</button>`}
-            <button class="submit" style="padding: 0.25rem; ${opts.submitButtonCssText || ""};">${opts.submitButtonText || "submit"}</button>
+            ${opts.submitButtonText === false || opts.submitButtonText === null ? "" : `<button class="submit" style="padding: 0.25rem; ${opts.submitButtonCssText || ""};">${opts.submitButtonText || "submit"}</button>`}
           </div>
         </div>
         <style>    
@@ -2577,7 +2577,7 @@ notes to self:
         }
       });
       opts.controls.submit = function() {
-        ctn.querySelector("button.submit").click();
+        ctn.querySelector("button.submit")?.click();
       };
       opts.controls.cancel = function() {
         promptResolver(null);
@@ -2586,10 +2586,12 @@ notes to self:
 
     let values = await new Promise((resolve) => {
       promptResolver = resolve;
-      ctn.querySelector("button.submit").onclick = () => {
-        let values = getAllValues();
-        resolve(values);
-      };
+      if(ctn.querySelector("button.submit")) {
+        ctn.querySelector("button.submit").onclick = () => {
+          let values = getAllValues();
+          resolve(values);
+        };
+      }
       if(ctn.querySelector("button.cancel")) {
         ctn.querySelector("button.cancel").onclick = () => {
           resolve(null);
@@ -6167,7 +6169,7 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
     headerEl.style.cssText = "padding-bottom:0.6rem; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:0.55rem;";
     headerEl.innerHTML = `
       <span style="display:inline-flex; align-items:center; color:var(--accent, #9d65c9); font-size:1.15rem;">${faIcon("circle-info") || "ℹ️"}</span>
-      <span style="font-size:1.1rem; font-weight:700;">Perchance AI Character Chat</span>
+      <span style="font-size:1.1rem; font-weight:700;">Purple's AI Character Chat</span>
     `;
     rootEl.appendChild(headerEl);
 
@@ -6500,11 +6502,13 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
         const res = await fetch("https://raw.githubusercontent.com/iyruk/pfacc-dev/main/CHANGELOG.md");
         if (!res.ok) throw new Error("HTTP " + res.status);
         const md = await res.text();
-        ctn.innerHTML = marked.parse(md);
+        const firstVerIdx = md.search(/^##\s+\[/m);
+        const cleanMd = firstVerIdx !== -1 ? md.slice(firstVerIdx) : md;
+        ctn.innerHTML = marked.parse(cleanMd);
         changelogLoaded = true;
       } catch(err) {
         console.warn("[Info Modal] Could not fetch remote changelog:", err);
-        const fallbackMd = `# Changelog Highlights\n\n## [0.7.1] - 2026-09-12\n### Added\n- **index.html**: Google Drive sync conflict handling, collision warning shield, and characters/chats/messages counts display.\n- **index.html**: Automated backup safety pause when newer cloud data is detected.\n- **index.html**: Google Drive session persistence in \`localStorage\` with silent background token renewal.\n\n## [0.7.0] - 2026-09-12\n### Added\n- **index.html**: Google Drive AppData Cloud Sync with automatic backup scheduling.\n\n## [0.6.9] - 2026-09-12\n### Added\n- **index.html**: AI Model favoriting, recent models tracking, and in-chat Context Info toggling (\`/ci\`).\n\n## [0.6.8] - 2026-09-12\n### Added\n- **index.html**: Nano-GPT provider preset, model context length badges, and Quick Model Switcher dialog.`;
+        const fallbackMd = `## [0.8.0] - 2026-09-12\n### Added\n- **index.html**: Tabbed Info modal (About, Resources, Changelog), feature cards, and cleaner starter screen.\n\n## [0.7.1] - 2026-09-12\n### Added\n- **index.html**: Google Drive sync conflict handling, collision warning shield, and characters/chats/messages counts display.\n- **index.html**: Automated backup safety pause when newer cloud data is detected.\n- **index.html**: Google Drive session persistence in \`localStorage\` with silent background token renewal.\n\n## [0.7.0] - 2026-09-12\n### Added\n- **index.html**: Google Drive AppData Cloud Sync with automatic backup scheduling.\n\n## [0.6.9] - 2026-09-12\n### Added\n- **index.html**: AI Model favoriting, recent models tracking, and in-chat Context Info toggling (\`/ci\`).\n\n## [0.6.8] - 2026-09-12\n### Added\n- **index.html**: Nano-GPT provider preset, model context length badges, and Quick Model Switcher dialog.`;
         if (window.marked && typeof window.marked.parse === "function") {
           ctn.innerHTML = marked.parse(fallbackMd);
         } else {

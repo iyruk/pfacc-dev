@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > been done — new sessions read it (via `AGENTS.md`) to understand project history
 > without needing git or chat history.
 
+## [0.8.1] - 2026-09-12
+
+### Changed
+
+- index.html: renamed Info modal title to "Purple's AI Character Chat".
+- index.html: updated `prompt2` dialog system to cleanly omit the submit button when `submitButtonText: false` (or `null`) and center the cancel/close button, eliminating the unwanted "submit" button on informational dialogs.
+- index.html: stripped repository header preamble (format description, SemVer notice, and internal instructions) when fetching and rendering CHANGELOG.md in `window.openInfoModal`, beginning release notes directly with the latest version.
+
 ## [0.8.0] - 2026-09-12
 
 ### Added
