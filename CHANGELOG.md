@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > been done — new sessions read it (via `AGENTS.md`) to understand project history
 > without needing git or chat history.
 
+## [0.8.3] - 2026-09-14
+
+### Added
+
+- index.html: added cloud sync safety check (`detectSyncDifference`) tracking count deltas across characters, chats & stories (`threads`), messages, and scenes against previous sync snapshots and live cloud backups.
+- index.html: added interactive safety confirmation modal in the Cloud Sync dialog when large differences or data reductions are detected before uploading to Google Drive or replacing local browser data from cloud, presenting a formatted side-by-side diff table with color-coded badges and explicit confirmation.
+- index.html: added automated safety pause in `checkAndRunAutoBackup` preventing silent background overwriting of cloud saves when large differences or data losses are detected, automatically switching schedule to manual and firing an advisory notification.
+- index.html: added scenes count tracking to sync metadata (`payloadObj.stats` and file `appProperties`) and displayed scenes counts on both the Local Browser and Google Drive cloud cards in the Cloud Sync modal dashboard.
+
 ## [0.8.2] - 2026-09-13
 
 ### Added

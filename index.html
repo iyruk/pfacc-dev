@@ -5412,18 +5412,20 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
     const numChars = payloadObj.stats?.characters ?? 0;
     const numThreads = payloadObj.stats?.threads ?? 0;
     const numMsgs = payloadObj.stats?.messages ?? 0;
+    const numScenes = payloadObj.stats?.scenes ?? 0;
     const exportedAt = payloadObj.exportedAt ?? Date.now();
 
     const appProperties = {
       characters: String(numChars),
       threads: String(numThreads),
       messages: String(numMsgs),
+      scenes: String(numScenes),
       exportedAt: String(exportedAt)
     };
 
     const metadata = {
       name: GDRIVE_SYNC_FILENAME,
-      description: `pfacc sync: ${numChars} characters, ${numThreads} chats, ${numMsgs} messages`,
+      description: `pfacc sync: ${numChars} characters, ${numThreads} chats, ${numMsgs} messages, ${numScenes} scenes`,
       appProperties: appProperties
     };
 
@@ -5501,6 +5503,193 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
   const GDRIVE_AUTOSYNC_KEY = "pfacc-gdrive-autosync-schedule";
   const GDRIVE_LAST_SYNC_KEY = "pfacc-last-cloud-sync";
   const GDRIVE_STATE_KEY = "pfacc-last-sync-state-key";
+  const GDRIVE_LAST_SYNC_STATS_KEY = "pfacc-last-sync-stats";
+
+  async function getLocalSyncStats() {
+    try {
+      const characters = await db.characters.count();
+      const threads = await db.threads.count();
+      const messages = await db.messages.count();
+      let scenes = 0;
+      try {
+        scenes = (await (window.getScenes ? window.getScenes() : getScenes())).length;
+      } catch(e) {
+        scenes = 0;
+      }
+      return { characters, threads, messages, scenes };
+    } catch(e) {
+      return { characters: 0, threads: 0, messages: 0, scenes: 0 };
+    }
+  }
+
+  function detectSyncDifference(currentStats, referenceStats) {
+    if (!referenceStats) {
+      return { hasLargeDifference: false, isDrop: false, reasons: [], diffs: {}, diffTableHtml: "" };
+    }
+
+    const curr = {
+      characters: Number(currentStats?.characters ?? 0),
+      threads: Number(currentStats?.threads ?? 0),
+      messages: Number(currentStats?.messages ?? 0),
+      scenes: Number(currentStats?.scenes ?? 0)
+    };
+
+    const prev = {
+      characters: Number(referenceStats?.characters ?? 0),
+      threads: Number(referenceStats?.threads ?? 0),
+      messages: Number(referenceStats?.messages ?? 0),
+      scenes: Number(referenceStats?.scenes ?? 0)
+    };
+
+    const diffs = {
+      characters: { old: prev.characters, new: curr.characters, diff: curr.characters - prev.characters },
+      threads: { old: prev.threads, new: curr.threads, diff: curr.threads - prev.threads },
+      messages: { old: prev.messages, new: curr.messages, diff: curr.messages - prev.messages },
+      scenes: { old: prev.scenes, new: curr.scenes, diff: curr.scenes - prev.scenes }
+    };
+
+    const reasons = [];
+    let isDrop = false;
+
+    // 1. Check for data loss / drops
+    if (diffs.characters.diff < 0) {
+      const drop = Math.abs(diffs.characters.diff);
+      const pct = prev.characters > 0 ? (drop / prev.characters) : 0;
+      if (curr.characters === 0 && prev.characters > 0) {
+        reasons.push(`All characters removed (was ${prev.characters})`);
+        isDrop = true;
+      } else if (prev.characters >= 3 && (drop >= 2 || pct >= 0.25)) {
+        reasons.push(`Characters reduced by ${drop} (-${Math.round(pct * 100)}%)`);
+        isDrop = true;
+      }
+    }
+
+    if (diffs.threads.diff < 0) {
+      const drop = Math.abs(diffs.threads.diff);
+      const pct = prev.threads > 0 ? (drop / prev.threads) : 0;
+      if (curr.threads === 0 && prev.threads > 0) {
+        reasons.push(`All chats & stories removed (was ${prev.threads})`);
+        isDrop = true;
+      } else if (prev.threads >= 3 && (drop >= 2 || pct >= 0.25)) {
+        reasons.push(`Chats & stories reduced by ${drop} (-${Math.round(pct * 100)}%)`);
+        isDrop = true;
+      }
+    }
+
+    if (diffs.messages.diff < 0) {
+      const drop = Math.abs(diffs.messages.diff);
+      const pct = prev.messages > 0 ? (drop / prev.messages) : 0;
+      if (curr.messages === 0 && prev.messages > 0) {
+        reasons.push(`All messages removed (was ${prev.messages})`);
+        isDrop = true;
+      } else if (prev.messages >= 40 && (drop >= 30 || pct >= 0.30)) {
+        reasons.push(`Messages reduced by ${drop} (-${Math.round(pct * 100)}%)`);
+        isDrop = true;
+      }
+    }
+
+    if (diffs.scenes.diff < 0) {
+      const drop = Math.abs(diffs.scenes.diff);
+      const pct = prev.scenes > 0 ? (drop / prev.scenes) : 0;
+      if (curr.scenes === 0 && prev.scenes > 0) {
+        reasons.push(`All scenes removed (was ${prev.scenes})`);
+        isDrop = true;
+      } else if (prev.scenes >= 3 && (drop >= 2 || pct >= 0.30)) {
+        reasons.push(`Scenes reduced by ${drop} (-${Math.round(pct * 100)}%)`);
+        isDrop = true;
+      }
+    }
+
+    // 2. Check for large surges / modifications (additions)
+    if (diffs.characters.diff > 0) {
+      const surge = diffs.characters.diff;
+      const pct = prev.characters > 0 ? (surge / prev.characters) : 1;
+      if (prev.characters >= 3 && (surge >= 5 || pct >= 0.50)) {
+        reasons.push(`Characters increased by +${surge} (+${Math.round(pct * 100)}%)`);
+      }
+    }
+
+    if (diffs.threads.diff > 0) {
+      const surge = diffs.threads.diff;
+      const pct = prev.threads > 0 ? (surge / prev.threads) : 1;
+      if (prev.threads >= 3 && (surge >= 5 || pct >= 0.50)) {
+        reasons.push(`Chats & stories increased by +${surge} (+${Math.round(pct * 100)}%)`);
+      }
+    }
+
+    if (diffs.messages.diff > 0) {
+      const surge = diffs.messages.diff;
+      const pct = prev.messages > 0 ? (surge / prev.messages) : 1;
+      if (prev.messages >= 50 && (surge >= 100 || pct >= 0.50)) {
+        reasons.push(`Messages increased by +${surge} (+${Math.round(pct * 100)}%)`);
+      }
+    }
+
+    if (diffs.scenes.diff > 0) {
+      const surge = diffs.scenes.diff;
+      const pct = prev.scenes > 0 ? (surge / prev.scenes) : 1;
+      if (prev.scenes >= 3 && (surge >= 4 || pct >= 0.50)) {
+        reasons.push(`Scenes increased by +${surge} (+${Math.round(pct * 100)}%)`);
+      }
+    }
+
+    const hasLargeDifference = reasons.length > 0;
+
+    function renderDiffBadge(d) {
+      if (d === 0) return `<span style="font-size:0.75rem; opacity:0.6;">0</span>`;
+      if (d > 0) return `<span style="font-size:0.75rem; font-weight:700; color:#2e9e44; background:rgba(46,158,68,0.12); padding:0.1rem 0.4rem; border-radius:100px;">+${d}</span>`;
+      return `<span style="font-size:0.75rem; font-weight:700; color:#d64545; background:rgba(214,69,69,0.15); padding:0.1rem 0.4rem; border-radius:100px;">${d}</span>`;
+    }
+
+    const diffTableHtml = `
+      <div style="width:100%; border:1px solid var(--border-color); border-radius:var(--border-radius-sm); overflow:hidden; font-size:0.8rem; margin:0.35rem 0;">
+        <table style="width:100%; border-collapse:collapse; text-align:left;">
+          <thead>
+            <tr style="background:var(--box-color, rgba(127,127,127,0.1)); border-bottom:1px solid var(--border-color); font-size:0.75rem;">
+              <th style="padding:0.4rem 0.6rem;">Item</th>
+              <th style="padding:0.4rem 0.6rem; text-align:center;">Previous / Cloud</th>
+              <th style="padding:0.4rem 0.6rem; text-align:center;">Current Local</th>
+              <th style="padding:0.4rem 0.6rem; text-align:right;">Difference</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid var(--border-color);">
+              <td style="padding:0.35rem 0.6rem; font-weight:600;">Characters</td>
+              <td style="padding:0.35rem 0.6rem; text-align:center;">${prev.characters}</td>
+              <td style="padding:0.35rem 0.6rem; text-align:center;">${curr.characters}</td>
+              <td style="padding:0.35rem 0.6rem; text-align:right;">${renderDiffBadge(diffs.characters.diff)}</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border-color);">
+              <td style="padding:0.35rem 0.6rem; font-weight:600;">Chats & Stories</td>
+              <td style="padding:0.35rem 0.6rem; text-align:center;">${prev.threads}</td>
+              <td style="padding:0.35rem 0.6rem; text-align:center;">${curr.threads}</td>
+              <td style="padding:0.35rem 0.6rem; text-align:right;">${renderDiffBadge(diffs.threads.diff)}</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border-color);">
+              <td style="padding:0.35rem 0.6rem; font-weight:600;">Messages</td>
+              <td style="padding:0.35rem 0.6rem; text-align:center;">${prev.messages}</td>
+              <td style="padding:0.35rem 0.6rem; text-align:center;">${curr.messages}</td>
+              <td style="padding:0.35rem 0.6rem; text-align:right;">${renderDiffBadge(diffs.messages.diff)}</td>
+            </tr>
+            <tr>
+              <td style="padding:0.35rem 0.6rem; font-weight:600;">Scenes</td>
+              <td style="padding:0.35rem 0.6rem; text-align:center;">${prev.scenes}</td>
+              <td style="padding:0.35rem 0.6rem; text-align:center;">${curr.scenes}</td>
+              <td style="padding:0.35rem 0.6rem; text-align:right;">${renderDiffBadge(diffs.scenes.diff)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    return {
+      hasLargeDifference,
+      isDrop,
+      reasons,
+      diffs,
+      diffTableHtml
+    };
+  }
 
   function getAutoSyncSchedule() {
     return localStorage.getItem(GDRIVE_AUTOSYNC_KEY) || "manual";
@@ -5613,21 +5802,65 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
 
       console.log("[Google Drive Sync] Running scheduled auto-backup...");
 
+      // Safety check: Detect large difference before auto-backup overwrites cloud
+      const localStats = await getLocalSyncStats();
+      let autoRefStats = null;
+      if (existingFile && existingFile.appProperties) {
+        autoRefStats = {
+          characters: Number(existingFile.appProperties.characters ?? 0),
+          threads: Number(existingFile.appProperties.threads ?? 0),
+          messages: Number(existingFile.appProperties.messages ?? 0),
+          scenes: Number(existingFile.appProperties.scenes ?? 0)
+        };
+      } else {
+        try {
+          autoRefStats = JSON.parse(localStorage.getItem(GDRIVE_LAST_SYNC_STATS_KEY) || "null");
+        } catch(e) {
+          autoRefStats = null;
+        }
+      }
+
+      const autoDiffCheck = detectSyncDifference(localStats, autoRefStats);
+      if (autoDiffCheck.hasLargeDifference && !isManualTrigger) {
+        setAutoSyncSchedule("manual");
+
+        const scheduleSelect = document.querySelector(".gdriveScheduleSelect");
+        if (scheduleSelect) scheduleSelect.value = "manual";
+        const scheduleBadge = document.querySelector(".gdriveAutoSyncBadge");
+        if (scheduleBadge) {
+          scheduleBadge.textContent = "Safety Paused";
+          scheduleBadge.style.background = "rgba(214,69,69,0.15)";
+          scheduleBadge.style.color = "#d64545";
+        }
+
+        const warnMsg = `⚠️ Cloud Auto-Sync Paused: Large difference detected (${autoDiffCheck.reasons.join(", ")}). Switched to Manual backup so your cloud data is not overwritten. Click to review in Cloud Sync.`;
+        console.warn("[Google Drive Sync]", warnMsg);
+
+        showToast(warnMsg, {
+          type: "warning",
+          duration: 12000,
+          actions: [
+            {
+              text: "Review Cloud Sync",
+              onClick: () => {
+                if (typeof window.openGoogleDriveSyncModal === "function") {
+                  window.openGoogleDriveSyncModal();
+                }
+              }
+            }
+          ]
+        });
+        return;
+      }
+
       const blob = await db.export({});
       const dexieJson = await new Response(blob).json();
-      const numCharacters = await db.characters.count();
-      const numThreads = await db.threads.count();
-      const numMessages = await db.messages.count();
 
       const payload = {
         pfaccSyncVersion: 1,
         exportedAt: now,
         device: (navigator.userAgent || "Unknown").slice(0, 120),
-        stats: {
-          characters: numCharacters,
-          threads: numThreads,
-          messages: numMessages
-        },
+        stats: localStats,
         dexieData: dexieJson
       };
 
@@ -5636,6 +5869,7 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
 
       localStorage.setItem(GDRIVE_LAST_SYNC_KEY, now.toString());
       localStorage.setItem(GDRIVE_STATE_KEY, currentFingerprint);
+      localStorage.setItem(GDRIVE_LAST_SYNC_STATS_KEY, JSON.stringify(localStats));
       window.__hasUnsavedChanges = false;
 
       console.log("[Google Drive Sync] Scheduled auto-backup completed successfully.");
@@ -5758,9 +5992,11 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
 
     async function refreshDashboard() {
       // Gather local stats
-      const numChars = await db.characters.count();
-      const numThreads = await db.threads.count();
-      const numMessages = await db.messages.count();
+      const localStats = await getLocalSyncStats();
+      const numChars = localStats.characters;
+      const numThreads = localStats.threads;
+      const numMessages = localStats.messages;
+      const numScenes = localStats.scenes;
       const lastLocalSync = localStorage.getItem("pfacc-last-cloud-sync");
       const lastLocalSyncNum = Number(lastLocalSync || 0);
       const lastLocalSyncFormatted = lastLocalSync ? new Date(lastLocalSyncNum).toLocaleString() : "Never synced";
@@ -5772,8 +6008,9 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
           </div>
           <div style="font-size:0.75rem; opacity:0.85; line-height:1.5;">
             <div>Characters: <b>${numChars}</b></div>
-            <div>Chats: <b>${numThreads}</b></div>
+            <div>Chats & Stories: <b>${numThreads}</b></div>
             <div>Messages: <b>${numMessages}</b></div>
+            <div>Scenes: <b>${numScenes}</b></div>
             <div style="margin-top:0.25rem; font-size:0.7rem; opacity:0.75;">Last Sync: ${lastLocalSyncFormatted}</div>
           </div>
         </div>
@@ -5803,6 +6040,7 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
             let cloudChars = currentDriveFile.appProperties?.characters;
             let cloudThreads = currentDriveFile.appProperties?.threads;
             let cloudMessages = currentDriveFile.appProperties?.messages;
+            let cloudScenes = currentDriveFile.appProperties?.scenes;
             let cloudExportedAt = currentDriveFile.appProperties?.exportedAt ? Number(currentDriveFile.appProperties.exportedAt) : new Date(currentDriveFile.modifiedTime).getTime();
 
             if (cloudChars == null || cloudThreads == null || cloudMessages == null) {
@@ -5812,11 +6050,13 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
                   cloudChars = String(payload.stats.characters ?? 0);
                   cloudThreads = String(payload.stats.threads ?? 0);
                   cloudMessages = String(payload.stats.messages ?? 0);
+                  cloudScenes = String(payload.stats.scenes ?? 0);
                   cloudExportedAt = Number(payload.exportedAt || new Date(currentDriveFile.modifiedTime).getTime());
                   currentDriveFile.appProperties = {
                     characters: cloudChars,
                     threads: cloudThreads,
                     messages: cloudMessages,
+                    scenes: cloudScenes,
                     exportedAt: String(cloudExportedAt)
                   };
                   fetch(`https://www.googleapis.com/drive/v3/files/${currentDriveFile.id}?fields=id,appProperties`, {
@@ -5839,12 +6079,25 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
             // Determine if cloud backup is newer than local sync
             isCloudNewer = (cloudExportedAt > lastLocalSyncNum + 5000) || (lastLocalSyncNum === 0 && (numChars > 0 || numMessages > 0));
 
+            // Check for large differences between local and cloud backup
+            const cloudStatsObj = {
+              characters: Number(cloudChars ?? 0),
+              threads: Number(cloudThreads ?? 0),
+              messages: Number(cloudMessages ?? 0),
+              scenes: Number(cloudScenes ?? 0)
+            };
+            const diffCheck = detectSyncDifference(localStats, cloudStatsObj);
+
             cloudCardEl.innerHTML = `
               <div style="font-weight:700; font-size:0.82rem; margin-bottom:0.35rem; display:flex; align-items:center; justify-content:space-between;">
                 <span style="display:flex; align-items:center; gap:0.35rem;">
                   <span style="color:#4285f4;">${faIcon("cloud") || "☁️"}</span> Google Drive
                 </span>
-                ${isCloudNewer ? `
+                ${diffCheck.hasLargeDifference ? `
+                  <span style="font-size:0.68rem; font-weight:700; color:${diffCheck.isDrop ? '#d64545' : '#d97706'}; background:${diffCheck.isDrop ? 'rgba(214,69,69,0.15)' : 'rgba(217,119,6,0.15)'}; border:1px solid ${diffCheck.isDrop ? 'rgba(214,69,69,0.35)' : 'rgba(217,119,6,0.3)'}; border-radius:100px; padding:0.1rem 0.4rem; display:inline-flex; align-items:center; gap:0.25rem;">
+                    ${faIcon("triangle-exclamation") || "⚠️"} Difference
+                  </span>
+                ` : isCloudNewer ? `
                   <span style="font-size:0.68rem; font-weight:700; color:#d97706; background:rgba(217,119,6,0.15); border:1px solid rgba(217,119,6,0.3); border-radius:100px; padding:0.1rem 0.4rem; display:inline-flex; align-items:center; gap:0.25rem;">
                     ${faIcon("triangle-exclamation") || "⚠️"} Newer
                   </span>
@@ -5856,14 +6109,31 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
               </div>
               <div class="gdriveCloudInfo" style="font-size:0.75rem; opacity:0.85; line-height:1.5;">
                 <div>Characters: <b>${cloudChars ?? "—"}</b></div>
-                <div>Chats: <b>${cloudThreads ?? "—"}</b></div>
+                <div>Chats & Stories: <b>${cloudThreads ?? "—"}</b></div>
                 <div>Messages: <b>${cloudMessages ?? "—"}</b></div>
+                <div>Scenes: <b>${cloudScenes ?? "—"}</b></div>
                 <div style="margin-top:0.25rem; font-size:0.7rem; opacity:0.75;">Modified: ${modDate}</div>
                 <div style="font-size:0.7rem; opacity:0.75;">Size: ${sizeStr}</div>
               </div>
             `;
 
-            if (isCloudNewer) {
+            if (diffCheck.hasLargeDifference) {
+              noticeBox.style.display = "flex";
+              noticeBox.innerHTML = `
+                <div style="background:${diffCheck.isDrop ? 'rgba(214,69,69,0.12)' : 'rgba(217,119,6,0.12)'}; border:1px solid ${diffCheck.isDrop ? 'rgba(214,69,69,0.35)' : 'rgba(217,119,6,0.35)'}; border-radius:var(--border-radius-sm); padding:0.55rem 0.75rem; font-size:0.75rem; color:var(--text-color); display:flex; flex-direction:column; gap:0.3rem;">
+                  <div style="font-weight:700; color:${diffCheck.isDrop ? '#d64545' : '#d97706'}; display:flex; align-items:center; gap:0.35rem;">
+                    ${faIcon("triangle-exclamation") || "⚠️"} ${diffCheck.isDrop ? 'Large data reduction detected between browser and cloud' : 'Large difference detected between browser and cloud'}
+                  </div>
+                  <div style="opacity:0.9; line-height:1.4;">
+                    ${diffCheck.isDrop ? 'Your current browser has significantly fewer items than your cloud backup. Please verify before uploading to prevent data loss.' : 'Noticeable differences were found between your browser and cloud backup:'}
+                  </div>
+                  ${diffCheck.diffTableHtml}
+                  <div style="font-size:0.7rem; opacity:0.8; font-style:italic;">
+                    Differences: ${diffCheck.reasons.join("; ")}
+                  </div>
+                </div>
+              `;
+            } else if (isCloudNewer) {
               noticeBox.style.display = "flex";
               noticeBox.innerHTML = `
                 <div style="background:rgba(217,119,6,0.12); border:1px solid rgba(217,119,6,0.35); border-radius:var(--border-radius-sm); padding:0.55rem 0.75rem; font-size:0.75rem; color:var(--text-color); display:flex; flex-direction:column; gap:0.25rem;">
@@ -5983,7 +6253,57 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
       uploadBtn.title = "Exports current local data and saves to Google Drive.";
 
       uploadBtn.addEventListener("click", async () => {
-        if (isCloudNewer && currentDriveFile) {
+        const localStats = await getLocalSyncStats();
+        let referenceStats = null;
+        if (currentDriveFile && currentDriveFile.appProperties) {
+          referenceStats = {
+            characters: Number(currentDriveFile.appProperties.characters ?? 0),
+            threads: Number(currentDriveFile.appProperties.threads ?? 0),
+            messages: Number(currentDriveFile.appProperties.messages ?? 0),
+            scenes: Number(currentDriveFile.appProperties.scenes ?? 0)
+          };
+        } else {
+          try {
+            referenceStats = JSON.parse(localStorage.getItem(GDRIVE_LAST_SYNC_STATS_KEY) || "null");
+          } catch(e) {
+            referenceStats = null;
+          }
+        }
+
+        const diffCheck = detectSyncDifference(localStats, referenceStats);
+
+        if (diffCheck.hasLargeDifference) {
+          const warningTitle = diffCheck.isDrop ? "Safety Check: Large Data Reduction Detected" : "Safety Check: Large Difference Detected";
+          const warningDescription = diffCheck.isDrop
+            ? `<div style="color:#d64545; font-weight:600; margin-bottom:0.35rem;">Warning: Your current browser has significantly FEWER items than your cloud backup / previous sync.</div>
+               <div style="opacity:0.85; line-height:1.45; margin-bottom:0.5rem;">Syncing now will overwrite Google Drive and remove these items from your cloud backup. Please review the comparison below:</div>`
+            : `<div style="font-weight:600; margin-bottom:0.35rem;">A large difference was detected between your current browser and your cloud backup / previous sync.</div>
+               <div style="opacity:0.85; line-height:1.45; margin-bottom:0.5rem;">Please review the changes below before updating Google Drive:</div>`;
+
+          const confirmResult = await prompt2({
+            warning: {
+              type: "none",
+              html: `
+                <div style="display:flex; flex-direction:column; gap:0.4rem; padding:0.2rem 0;">
+                  <div style="font-size:1.05rem; font-weight:700; display:flex; align-items:center; gap:0.4rem; color:${diffCheck.isDrop ? '#d64545' : '#d97706'};">
+                    ${faIcon("triangle-exclamation") || "⚠️"} ${warningTitle}
+                  </div>
+                  ${warningDescription}
+                  ${diffCheck.diffTableHtml}
+                  <div style="font-size:0.75rem; opacity:0.8; font-style:italic; margin-top:0.25rem;">
+                    Key differences: ${diffCheck.reasons.join("; ")}
+                  </div>
+                </div>
+              `
+            }
+          }, {
+            submitButtonText: diffCheck.isDrop ? "Confirm & Overwrite Cloud" : "Confirm & Sync Difference",
+            cancelButtonText: "Cancel",
+            width: "500px"
+          });
+
+          if (!confirmResult) return;
+        } else if (isCloudNewer && currentDriveFile) {
           const modDate = new Date(Number(currentDriveFile.appProperties?.exportedAt) || currentDriveFile.modifiedTime).toLocaleString();
           const cloudChars = currentDriveFile.appProperties?.characters ?? "?";
           const cloudChats = currentDriveFile.appProperties?.threads ?? "?";
@@ -6006,20 +6326,13 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
         try {
           const blob = await db.export({});
           const dexieJson = await new Response(blob).json();
-          const numCharacters = await db.characters.count();
-          const numThreads = await db.threads.count();
-          const numMessages = await db.messages.count();
           const now = Date.now();
 
           const payload = {
             pfaccSyncVersion: 1,
             exportedAt: now,
             device: (navigator.userAgent || "Unknown").slice(0, 120),
-            stats: {
-              characters: numCharacters,
-              threads: numThreads,
-              messages: numMessages
-            },
+            stats: localStats,
             dexieData: dexieJson
           };
 
@@ -6028,6 +6341,7 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
           currentDriveFile = resultFile;
           localStorage.setItem(GDRIVE_LAST_SYNC_KEY, now.toString());
           localStorage.setItem(GDRIVE_STATE_KEY, await getLocalDataFingerprint());
+          localStorage.setItem(GDRIVE_LAST_SYNC_STATS_KEY, JSON.stringify(localStats));
           window.__hasUnsavedChanges = false;
 
           logBox.textContent = "Backup successfully saved to Google Drive!";
@@ -6076,8 +6390,47 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
 
         if (!restoreChoice) return;
 
-        if (restoreChoice.keepExistingData === "no" && !confirm("⚠️ WARNING: This will REPLACE all local chats and characters in this browser with the cloud backup. Do you want to proceed?")) {
-          return;
+        // Safety check for replace-all restore mode
+        if (restoreChoice.keepExistingData === "no") {
+          const currentLocal = await getLocalSyncStats();
+          const cloudStats = {
+            characters: Number(currentDriveFile.appProperties?.characters ?? 0),
+            threads: Number(currentDriveFile.appProperties?.threads ?? 0),
+            messages: Number(currentDriveFile.appProperties?.messages ?? 0),
+            scenes: Number(currentDriveFile.appProperties?.scenes ?? 0)
+          };
+          const restoreDiff = detectSyncDifference(cloudStats, currentLocal);
+
+          if (restoreDiff.hasLargeDifference) {
+            const confirmRestore = await prompt2({
+              warning: {
+                type: "none",
+                html: `
+                  <div style="display:flex; flex-direction:column; gap:0.4rem; padding:0.2rem 0;">
+                    <div style="font-size:1.05rem; font-weight:700; display:flex; align-items:center; gap:0.4rem; color:#d97706;">
+                      ${faIcon("triangle-exclamation") || "⚠️"} Large Restore Difference
+                    </div>
+                    <div style="opacity:0.9; line-height:1.45; margin-bottom:0.5rem;">
+                      Replacing local browser data with the cloud backup will change your local counts as follows:
+                    </div>
+                    ${restoreDiff.diffTableHtml}
+                    <div style="color:#d64545; font-weight:600; font-size:0.8rem; margin-top:0.25rem;">
+                      ⚠️ This will REPLACE all local chats, messages, and characters in this browser. Are you sure you want to proceed?
+                    </div>
+                  </div>
+                `
+              }
+            }, {
+              submitButtonText: "Yes, Replace Local Data",
+              cancelButtonText: "Cancel",
+              width: "500px"
+            });
+            if (!confirmRestore) return;
+          } else {
+            if (!confirm("⚠️ WARNING: This will REPLACE all local chats and characters in this browser with the cloud backup. Do you want to proceed?")) {
+              return;
+            }
+          }
         }
 
         downloadBtn.disabled = true;
@@ -6111,6 +6464,8 @@ if (window.updateAndDeleteAvatarProperties === "yes") { await updateAndDeleteAva
             const restoredTime = Number(payload.exportedAt) || Date.now();
             localStorage.setItem(GDRIVE_LAST_SYNC_KEY, restoredTime.toString());
             localStorage.setItem(GDRIVE_STATE_KEY, await getLocalDataFingerprint());
+            const updatedStats = await getLocalSyncStats();
+            localStorage.setItem(GDRIVE_LAST_SYNC_STATS_KEY, JSON.stringify(updatedStats));
             window.__hasUnsavedChanges = false;
 
             logBox.textContent = "Data successfully restored from Google Drive!";
