@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > been done — new sessions read it (via `AGENTS.md`) to understand project history
 > without needing git or chat history.
 
+## [0.8.2] - 2026-09-13
+
+### Added
+
+- index.html: added `window.openCreateAiCharacterModal` allowing users to generate complete characters from AI with rich guidance: optional steering description, scene context (for world premise, tone, and opening scenario), and existing character selection (for universe rules, relationships, and image prompt continuity).
+- index.html: added a compact dropdown menu popup (`#createCharacterMenuPopup`) anchored directly to `create character ▾` providing quick access to "From AI" (guided AI generator), "From Scratch" (manual character editor), and "From URL" (import from Perchance/character URL) with outside-click dismissal.
+- index.html: added a rich character guidance dropdown picker in the AI Character Creator modal displaying each character's circular avatar photo, name, and subtitle tagline, with search filtering and outside-click dismissal.
+- index.html: added automated post-creation character editor review (`characterDetailsPrompt(newCharObj)`) and optional avatar generation (`generateCharacterAvatarDataUrl`) during AI character creation before saving.
+
+### Changed
+
+- index.html: unified character creation actions in `#createCharacterAreaCtn` into a single `create character ▾` button, simplifying toolbar clutter while consolidating all creation pathways.
+
 ## [0.8.1] - 2026-09-12
 
 ### Changed

@@ -3141,6 +3141,10 @@ notes to self:
   #createCharacterAreaCtn .charSelectionActions button:hover {
     transform: translateY(-1px);
   }
+  #createCharacterMenuPopup button,
+  #createCharacterMenuPopup button:hover {
+    transform: none !important;
+  }
 
   #characterFoldersList {
     display: flex;
@@ -3686,8 +3690,23 @@ notes to self:
             <span id="characterListCountEl" style="font-size:0.75rem; font-weight:600; color:var(--link-color); background:var(--box-color); padding:0.15rem 0.5rem; border-radius:100px;"></span>
           </h2>
           <div class="charSelectionActions">
-            <button id="fromUrlToggleBtn" style="padding:0.4rem 1rem; max-height:min-content;">[icon("globe")] from URL</button>
-            <button id="newCharacterButton" style="padding:0.4rem 1rem; max-height:min-content;">[icon("tools")] create new character</button>
+            <div style="position:relative; display:inline-block;">
+              <button id="newCharacterButton" style="padding:0.4rem 1rem; max-height:min-content;">[icon("user-plus")] create character ▾</button>
+              <div id="createCharacterMenuPopup" data-original-display-value="flex" style="position:absolute; display:none; top:calc(100% + 4px); left:0; padding:0.35rem; background:var(--background); border-radius:var(--border-radius); min-width:100%; border:1px solid var(--border-color); flex-direction:column; gap:0.25rem; z-index:100; box-shadow:0 6px 18px rgba(0,0,0,0.35);">
+                <button id="createCharFromAiBtn" style="display:flex; align-items:center; gap:0.5rem; text-align:left; padding:0.45rem 0.75rem; border-radius:var(--border-radius); font-size:0.85rem; width:100%; white-space:nowrap;">
+                  <span style="color:var(--accent, #9d65c9); display:inline-flex; width:1.1rem; justify-content:center;">[icon("wand-magic-sparkles")]</span>
+                  <span>From AI</span>
+                </button>
+                <button id="createCharFromScratchBtn" style="display:flex; align-items:center; gap:0.5rem; text-align:left; padding:0.45rem 0.75rem; border-radius:var(--border-radius); font-size:0.85rem; width:100%; white-space:nowrap;">
+                  <span style="display:inline-flex; width:1.1rem; justify-content:center;">[icon("user-pen")]</span>
+                  <span>From Scratch</span>
+                </button>
+                <button id="createCharFromUrlBtn" style="display:flex; align-items:center; gap:0.5rem; text-align:left; padding:0.45rem 0.75rem; border-radius:var(--border-radius); font-size:0.85rem; width:100%; white-space:nowrap;">
+                  <span style="display:inline-flex; width:1.1rem; justify-content:center;">[icon("globe")]</span>
+                  <span>From URL</span>
+                </button>
+              </div>
+            </div>
             <button id="searchCharacterButton" style="padding:0.4rem 1rem; max-height:min-content;">[icon("search")] Character Database</button>
           </div>
         </div>
@@ -9157,7 +9176,7 @@ fitMessagesInContextMethod: "dropOld",
   }
   initCharacterSortSelects();
 
-  $.fromUrlToggleBtn.addEventListener("click", function() {
+  $.fromUrlToggleBtn?.addEventListener("click", function() {
     let ctn = document.getElementById("generateCharacterFromUrlCtn");
     ctn.style.display = ctn.style.display === "none" ? "block" : "none";
     if(ctn.style.display !== "none") $.generateCharacterFromUrlInputEl.focus();
@@ -11467,11 +11486,50 @@ fitMessagesInContextMethod: "dropOld",
     });
   }
 
-  $.newCharacterButton.addEventListener("click", async function() {
+  $.newCharacterButton.addEventListener("click", function(e) {
+    e.stopPropagation();
+    if ($.createCharacterMenuPopup.offsetHeight === 0) {
+      showEl($.createCharacterMenuPopup);
+    } else {
+      hideEl($.createCharacterMenuPopup);
+    }
+  });
+
+  window.addEventListener("click", function(e) {
+    if ($.createCharacterMenuPopup && $.createCharacterMenuPopup.offsetHeight > 0 &&
+        document.body.contains(e.target) &&
+        !$.createCharacterMenuPopup.contains(e.target) &&
+        !$.newCharacterButton.contains(e.target)) {
+      hideEl($.createCharacterMenuPopup);
+    }
+  });
+
+  $.createCharFromAiBtn?.addEventListener("click", async function() {
+    hideEl($.createCharacterMenuPopup);
+    if (typeof window.openCreateAiCharacterModal === "function") {
+      await window.openCreateAiCharacterModal();
+    }
+  });
+
+  $.createCharFromScratchBtn?.addEventListener("click", async function() {
+    hideEl($.createCharacterMenuPopup);
     const result = await characterDetailsPrompt();
-    if(!result) return;
+    if (!result) return;
     const character = await addCharacter(result);
     await createNewThreadWithCharacterId(character.id);
+  });
+
+  $.createCharFromUrlBtn?.addEventListener("click", function() {
+    hideEl($.createCharacterMenuPopup);
+    let ctn = document.getElementById("generateCharacterFromUrlCtn");
+    if (ctn) {
+      ctn.style.display = "block";
+      let input = document.getElementById("generateCharacterFromUrlInputEl");
+      if (input) {
+        input.focus();
+        input.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }
   });
 
   // $.newFolderCharacterButton.addEventListener("click", async function() {
@@ -22042,6 +22100,403 @@ Character #1 ([Name]): [Apparent age (Convert numerical age to a descriptive age
       searchDepth: Number(result.enhanceSearch || 0),
     });
   });
+
+  window.openCreateAiCharacterModal = async function() {
+    let scenes = await (window.getScenes ? window.getScenes() : getScenes());
+    let characters = await db.characters.toArray();
+    characters.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+    let sceneOptions = [
+      { value: "", content: "None (Freestyle)" },
+      ...scenes.map(s => ({ value: s.id, content: s.title || "Untitled Scene" }))
+    ];
+
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    // Custom character guidance picker showing avatar photo, name, and tagline
+    let pickerCtn = document.createElement("div");
+    pickerCtn.style.cssText = "position:relative; margin-bottom:0.35rem;";
+
+    let labelEl = document.createElement("label");
+    labelEl.style.cssText = "display:block; font-size:0.85rem; font-weight:600; margin-bottom:0.35rem; color:var(--text-color);";
+    labelEl.innerHTML = `👤 Guidance Character <i style="opacity:0.7; font-weight:normal;">(optional — inherit world tone, spawn rules, and relationship context)</i>`;
+    pickerCtn.appendChild(labelEl);
+
+    let hiddenInput = document.createElement("input");
+    hiddenInput.type = "hidden";
+    hiddenInput.dataset.specKey = "characterId";
+    hiddenInput.value = "";
+    pickerCtn.appendChild(hiddenInput);
+
+    let triggerBtn = document.createElement("button");
+    triggerBtn.type = "button";
+    triggerBtn.style.cssText = "display:flex; align-items:center; gap:0.65rem; width:100%; padding:0.45rem 0.65rem; border:1px solid var(--border-color); border-radius:var(--border-radius); background:var(--input-bg, var(--background)); color:var(--text-color); cursor:pointer; text-align:left; min-height:46px; box-sizing:border-box;";
+
+    function renderTriggerContent(char) {
+      if (!char) {
+        triggerBtn.innerHTML = `
+          <div style="width:30px; height:30px; border-radius:50%; background:var(--card-hover, rgba(120,120,120,0.25)); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:0.85rem;">👤</div>
+          <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+            <div style="font-size:0.85rem; font-weight:500;">-- None (original concept) --</div>
+            <div style="font-size:0.72rem; opacity:0.65;">Standalone character without reference</div>
+          </div>
+          <span style="opacity:0.6; font-size:0.8rem; margin-left:auto;">▾</span>
+        `;
+      } else {
+        let avatarHtml = char.avatar?.url
+          ? `<img src="${esc(char.avatar.url)}" style="width:30px; height:30px; border-radius:50%; object-fit:cover; flex-shrink:0;" />`
+          : `<div style="width:30px; height:30px; border-radius:50%; background:var(--card-hover, rgba(120,120,120,0.25)); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-weight:bold; font-size:0.8rem;">${esc(char.name ? char.name.charAt(0).toUpperCase() : "?")}</div>`;
+        let taglineText = char.tagline || (char.roleInstruction ? char.roleInstruction.slice(0, 60) : "") || "No tagline";
+        triggerBtn.innerHTML = `
+          ${avatarHtml}
+          <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+            <div style="font-size:0.85rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(char.name || "Untitled")}</div>
+            <div style="font-size:0.72rem; opacity:0.72; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(taglineText)}</div>
+          </div>
+          <span style="opacity:0.6; font-size:0.8rem; margin-left:auto;">▾</span>
+        `;
+      }
+    }
+    renderTriggerContent(null);
+    pickerCtn.appendChild(triggerBtn);
+
+    let dropdownPanel = document.createElement("div");
+    dropdownPanel.style.cssText = "position:absolute; top:calc(100% + 4px); left:0; right:0; max-height:220px; overflow-y:auto; background:var(--background); border:1px solid var(--border-color); border-radius:var(--border-radius); box-shadow:0 8px 24px rgba(0,0,0,0.45); z-index:1000; display:none; flex-direction:column; gap:2px; padding:4px; box-sizing:border-box;";
+    pickerCtn.appendChild(dropdownPanel);
+
+    let searchInput = null;
+    if (characters.length > 5) {
+      searchInput = document.createElement("input");
+      searchInput.type = "text";
+      searchInput.placeholder = "🔍 Search characters...";
+      searchInput.style.cssText = "width:100%; padding:0.4rem 0.6rem; font-size:0.82rem; border-bottom:1px solid var(--border-color); border-top:none; border-left:none; border-right:none; background:transparent; outline:none; color:var(--text-color); box-sizing:border-box; margin-bottom:4px;";
+      dropdownPanel.appendChild(searchInput);
+    }
+
+    let listCtn = document.createElement("div");
+    listCtn.style.cssText = "display:flex; flex-direction:column; gap:2px;";
+    dropdownPanel.appendChild(listCtn);
+
+    function buildGuidanceOptions(filter = "") {
+      listCtn.innerHTML = "";
+      filter = filter.trim().toLowerCase();
+
+      // None option
+      if (!filter || "-- none (original concept) --".includes(filter)) {
+        let noneItem = document.createElement("div");
+        noneItem.style.cssText = "display:flex; align-items:center; gap:0.65rem; padding:0.4rem 0.55rem; border-radius:var(--border-radius); cursor:pointer; transition:background var(--transition, 0.15s);";
+        noneItem.innerHTML = `
+          <div style="width:30px; height:30px; border-radius:50%; background:var(--card-hover, rgba(120,120,120,0.25)); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:0.85rem;">👤</div>
+          <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+            <div style="font-size:0.85rem; font-weight:500;">-- None (original concept) --</div>
+            <div style="font-size:0.72rem; opacity:0.65;">Standalone character without reference</div>
+          </div>
+        `;
+        noneItem.onmouseenter = () => noneItem.style.background = "var(--card-hover, rgba(255,255,255,0.08))";
+        noneItem.onmouseleave = () => noneItem.style.background = "transparent";
+        noneItem.onclick = (e) => {
+          e.stopPropagation();
+          hiddenInput.value = "";
+          renderTriggerContent(null);
+          dropdownPanel.style.display = "none";
+        };
+        listCtn.appendChild(noneItem);
+      }
+
+      for (let char of characters) {
+        let nameMatch = (char.name || "").toLowerCase().includes(filter);
+        let taglineMatch = (char.tagline || "").toLowerCase().includes(filter);
+        if (filter && !nameMatch && !taglineMatch) continue;
+
+        let item = document.createElement("div");
+        item.style.cssText = "display:flex; align-items:center; gap:0.65rem; padding:0.4rem 0.55rem; border-radius:var(--border-radius); cursor:pointer; transition:background var(--transition, 0.15s);";
+
+        let avatarHtml = char.avatar?.url
+          ? `<img src="${esc(char.avatar.url)}" style="width:30px; height:30px; border-radius:50%; object-fit:cover; flex-shrink:0;" />`
+          : `<div style="width:30px; height:30px; border-radius:50%; background:var(--card-hover, rgba(120,120,120,0.25)); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-weight:bold; font-size:0.8rem;">${esc(char.name ? char.name.charAt(0).toUpperCase() : "?")}</div>`;
+        let taglineText = char.tagline || (char.roleInstruction ? char.roleInstruction.slice(0, 60) : "") || "No tagline";
+
+        item.innerHTML = `
+          ${avatarHtml}
+          <div style="display:flex; flex-direction:column; min-width:0; flex:1;">
+            <div style="font-size:0.85rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text-color);">${esc(char.name || "Untitled")}</div>
+            <div style="font-size:0.72rem; opacity:0.72; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(taglineText)}</div>
+          </div>
+        `;
+        item.onmouseenter = () => item.style.background = "var(--card-hover, rgba(255,255,255,0.08))";
+        item.onmouseleave = () => item.style.background = "transparent";
+        item.onclick = (e) => {
+          e.stopPropagation();
+          hiddenInput.value = String(char.id);
+          renderTriggerContent(char);
+          dropdownPanel.style.display = "none";
+        };
+        listCtn.appendChild(item);
+      }
+    }
+
+    buildGuidanceOptions();
+
+    if (searchInput) {
+      searchInput.oninput = (e) => buildGuidanceOptions(e.target.value);
+      searchInput.onclick = (e) => e.stopPropagation();
+    }
+
+    triggerBtn.onclick = (e) => {
+      e.stopPropagation();
+      let isVisible = dropdownPanel.style.display === "flex";
+      dropdownPanel.style.display = isVisible ? "none" : "flex";
+      if (!isVisible && searchInput) {
+        setTimeout(() => searchInput.focus(), 50);
+      }
+    };
+
+    let outsideClickListener = (e) => {
+      if (!pickerCtn.contains(e.target)) {
+        dropdownPanel.style.display = "none";
+      }
+    };
+    window.addEventListener("click", outsideClickListener);
+
+    let result = await prompt2({
+      _header: {
+        type: "none",
+        html: `<div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.25rem;">
+          <span style="font-size:1.25rem; color:var(--accent, #9d65c9);">${faIcon("wand-magic-sparkles") || "✨"}</span>
+          <span style="font-size:1.05rem; font-weight:700;">Create Character with AI</span>
+        </div>
+        <div style="font-size:0.8rem; opacity:0.75; line-height:1.45; margin-bottom:0.25rem;">
+          Describe the character you want to create. You can also optionally ground them in an existing character's universe or attach a starting scene/scenario.
+        </div>`
+      },
+      description: {
+        label: `📝 Character Description & Guidance <i style="opacity:0.7;">(traits, personality, role, backstory, or leave blank to invent someone fresh)</i>`,
+        type: "text",
+        height: "fit-content",
+        minHeight: "4.5rem",
+        placeholder: "e.g. A cynical cyberpunk detective with a mechanical arm and a soft spot for stray synths...",
+        focus: true
+      },
+      sceneId: {
+        label: `🎬 Guidance Scene / Scenario <i style="opacity:0.7;">(optional — provides world setting, atmosphere & tone)</i>`,
+        type: "select",
+        options: sceneOptions,
+        defaultValue: ""
+      },
+      guidanceCharacterPicker: {
+        type: "none",
+        html: pickerCtn
+      },
+      generateAvatar: {
+        label: `🎨 Generate avatar portrait with AI`,
+        type: "checkbox",
+        defaultValue: true
+      },
+      reviewInEditor: {
+        label: `✏️ Review in Character Editor before saving`,
+        infoTooltip: "When checked, opens the character editor dossier so you can inspect and adjust stats, appearance, and dialogue before saving. When unchecked, creates the character directly and opens chat.",
+        type: "checkbox",
+        defaultValue: true
+      }
+    }, {
+      submitButtonText: "✨ Generate Character",
+      cancelButtonText: "Cancel",
+      width: "600px"
+    });
+
+    window.removeEventListener("click", outsideClickListener);
+
+    if (!result) return;
+
+    let taskId = "create-ai-char-" + Date.now();
+    let cancelled = false;
+    window.showTaskToast(taskId, "Designing character with AI...", () => {
+      cancelled = true;
+    });
+
+    try {
+      let chosenScene = result.sceneId ? scenes.find(s => s.id === result.sceneId) : null;
+      let guidanceChar = result.characterId ? characters.find(c => String(c.id) === String(result.characterId)) : null;
+
+      let parts = [];
+      parts.push(`You are an expert creative writer and character designer for interactive text roleplay. Design ONE complete, compelling character based on the user's request, making sure they fit naturally into the established tone and universe.`);
+
+      if (chosenScene) {
+        let sceneDetails = [
+          `Title: ${chosenScene.title}`,
+          chosenScene.premise ? `Premise: ${chosenScene.premise}` : "",
+          chosenScene.setting ? `Setting & Atmosphere: ${chosenScene.setting}` : "",
+        ].filter(Boolean).join("\n");
+        parts.push(`=== SCENE & WORLD SETTING (the character must fit into this world and premise) ===\n${sceneDetails}\n=== END SCENE CONTEXT ===`);
+      }
+
+      if (guidanceChar) {
+        let spawnRules = (guidanceChar.spawnRules || "").trim();
+        let charSetting = (guidanceChar.roleInstruction || "").replace(/<!--hidden-from-ai-start-->.+?<!--hidden-from-ai-end-->/gs, "").replace(/\s+/g, " ").trim().slice(0, 700);
+        let charDetails = [
+          `Name: ${guidanceChar.name}`,
+          guidanceChar.tagline ? `Tagline: ${guidanceChar.tagline}` : "",
+          charSetting ? `Setting / Background: ${charSetting}` : "",
+          spawnRules ? `World / Spawn Rules: ${spawnRules}` : "",
+        ].filter(Boolean).join("\n");
+        parts.push(`=== EXISTING CHARACTER / UNIVERSE CONTEXT ===\n${charDetails}\nThe new character should exist within the same universe and have natural narrative chemistry, ties, or contrast with ${guidanceChar.name}.\n=== END CHARACTER CONTEXT ===`);
+      }
+
+      let userDesc = (result.description || "").trim();
+      if (userDesc) {
+        parts.push(`=== USER'S CREATION REQUEST & GUIDANCE ===\n${userDesc}\nCombine both: user-stated details stay authoritative, while the world/scene context governs unspecified details and tone.`);
+      } else {
+        parts.push(`=== USER'S CREATION REQUEST ===\nInvent an original, nuanced character that fits the provided context.`);
+      }
+
+      parts.push(`CRITICAL — STAY FAITHFUL TO THE USER'S REQUEST: Any concrete details the user explicitly stated (hair/eye/skin color, gender, build, clothing, scars, age, name, abilities, personality) MUST be reproduced EXACTLY — especially in the APPEARANCE field.`);
+      parts.push(`CRITICAL — NO PLACEHOLDERS: Never write "Not explicitly detailed", "unspecified", "unknown", "N/A", or similar placeholder text. Every field must contain vivid, concrete detail. If a detail wasn't specified, invent one that fits the character and setting.`);
+      parts.push(`Respond using this EXACT markdown template, filling in EVERY field (do not skip or rename any heading):\n` + [
+        `# Character: <name>`,
+        `Role: <their role in the story, e.g. Protagonist, Companion, Antagonist, Rival, Mentor, Specialist>`,
+        ``,
+        `Age: <age or age range>`,
+        `Height: <height>`,
+        `Gender: <gender>`,
+        `Bust: <body build or physique, e.g. athletic, slender, muscular>`,
+        `Job: <occupation or role in life>`,
+        ``,
+        `## Appearance`,
+        `Hair: <color, length, style>`,
+        `Eyes: <color, shape, expression>`,
+        `Features: <face, skin tone, scars, marks, distinct physical traits>`,
+        `Attire: <typical outfit and style>`,
+        ``,
+        `## Persona`,
+        `Mind: <core personality and inner psyche in 2-3 sentences>`,
+        `Mannerisms: <habits, gestures, vocal quirks>`,
+        `Drive: <goals and deepest fears>`,
+        `Likes: <comma-separated list>`,
+        `Dislikes: <comma-separated list>`,
+        ``,
+        `## Relationships`,
+        `<Name (Relation); Name (Relation); ... — or "None established" if unknown>`,
+        ``,
+        `## Context`,
+        `Summary: <2-4 sentence summary of who this character is and how they fit into the world>`,
+        ``,
+        `## Dialogue Examples`,
+        `1. <example line with *actions* — demonstrate their speaking voice>`,
+        `2. <example line with *actions*>`,
+        `3. <example line with *actions*>`,
+      ].join("\n"));
+      parts.push(`---END---`);
+
+      let instruction = parts.join("\n\n");
+      let data = await root.aiTextPlugin({ instruction, startWith: "# Character:", stopSequences: ["---END---"] });
+      if (cancelled) return;
+      if (data.stopReason === "error") throw new Error("The AI failed to generate the character profile. Please try again.");
+
+      let text = (data.text != null ? data.text : ("# Character: " + (data.generatedText || ""))).trim();
+      if (!/^\s*#\s*Character\s*:/i.test(text)) text = "# Character: " + text;
+      text = text.replace(/---END---[\s\S]*$/i, "").trim();
+
+      let charName = ((text.match(/^\s*#\s*Character\s*:\s*([^\n]+)/im) || [])[1] || "").trim();
+      let charRole = extractSpawnLineField(text, "Role");
+      let charAppearance = extractSpawnMarkdownSection(text, "Appearance");
+      let charPersona = extractSpawnMarkdownSection(text, "Persona");
+      let charContextSummary = extractSpawnLineField(extractSpawnMarkdownSection(text, "Context"), "Summary");
+      let charDialogueExamples = extractSpawnMarkdownSection(text, "Dialogue Examples");
+
+      if (!charName) charName = ((userDesc || "").split(/[,.\n]/)[0] || "New Character").trim().slice(0, 40);
+
+      let fullRole = [
+        text,
+        `\n\nYou may use Markdown: *narration/actions* and "dialogue".`,
+      ].filter(Boolean).join("\n");
+
+      let spawnReminderMessage = [
+        `You are ${charName}. Stay strictly in character:`,
+        extractSpawnLineField(charPersona, "Mind") ? `- Mind: ${extractSpawnLineField(charPersona, "Mind")}` : "",
+        extractSpawnLineField(charPersona, "Mannerisms") ? `- Mannerisms: ${extractSpawnLineField(charPersona, "Mannerisms")}` : "",
+        extractSpawnLineField(charPersona, "Drive") ? `- Drive: ${extractSpawnLineField(charPersona, "Drive")}` : "",
+        charDialogueExamples ? `\nMatch this speech/voice style:\n${charDialogueExamples}` : "",
+      ].filter(Boolean).join("\n");
+
+      let parentPrefix = (guidanceChar?.imagePromptPrefix ?? "").toString();
+      let parentSuffix = (guidanceChar?.imagePromptSuffix ?? "").toString();
+
+      let avatarUrl = "";
+      let shouldGenerateAvatar = result.generateAvatar === "yes" || result.generateAvatar === true;
+      if (shouldGenerateAvatar && !cancelled) {
+        try {
+          avatarUrl = await window.generateCharacterAvatarDataUrl(
+            { name: charName, appearance: charAppearance, roleInstruction: text, imagePromptPrefix: parentPrefix, imagePromptSuffix: parentSuffix },
+            { userName: "User" }
+          );
+        } catch (imgErr) {
+          console.warn("[AI Character] Avatar generation failed:", imgErr);
+        }
+      }
+
+      let newCharObj = {
+        name: charName.replace(/#/g, ""),
+        tagline: `${charRole || "Character"}${charContextSummary ? " — " + charContextSummary.slice(0, 70) : ""}`,
+        roleInstruction: fullRole,
+        appearance: charAppearance,
+        spawnRules: guidanceChar?.spawnRules || "",
+        reminderMessage: spawnReminderMessage,
+        messageWrapperStyle: "",
+        petraCustomSecretInformation: "",
+        customCode: "",
+        imagePromptPrefix: parentPrefix,
+        imagePromptSuffix: parentSuffix,
+        imagePromptTriggers: charAppearance ? `${charName}: ${charAppearance}` : "",
+        messageInputPlaceholder: "",
+        metaTitle: "", metaDescription: "", metaImage: "",
+        modelName: "perchance-ai",
+        textEmbeddingModelName: currentDefaultTextEmbeddingModelName,
+        temperature: 0.8,
+        maxTokensPerMessage: 500,
+        initialMessages: chosenScene?.openingNarration ? [{author:"system", name:"Narrator", content:chosenScene.openingNarration}] : [{author:"system", hiddenFrom:["ai"], content:`<i style="font-size:85%; opacity:0.6;"><b>Tip</b>: You can tap the 'Narrator' button above the reply box to generate a starting scenario.</i>`}],
+        loreBookUrls: [],
+        shortcutButtons: [],
+        avatar: { url: avatarUrl || "", size: 1, shape: "circle" },
+        scene: { background: { url: "" }, music: { url: "" } },
+        userCharacter: { avatar: {} },
+        systemCharacter: { avatar: {} },
+        streamingResponse: true,
+        folderPath: guidanceChar?.folderPath || "",
+        customData: { PUBLIC: { $metaTitle: "", $metaDescription: "", $metaImage: "" } },
+        uuid: null,
+        fitMessagesInContextMethod: "summarizeOld",
+        autoGenerateMemories: "none",
+      };
+
+      window.finishTaskToast(taskId, "completed");
+
+      let shouldReview = result.reviewInEditor === "yes" || result.reviewInEditor === true;
+      if (shouldReview) {
+        let editorResult = await characterDetailsPrompt(newCharObj);
+        if (!editorResult) return;
+        let savedCharacter = await addCharacter(editorResult);
+        await renderCharacterList();
+        showToast(`✨ ${savedCharacter.name} created!`);
+        await createNewThreadWithCharacterId(savedCharacter.id, { scene: chosenScene });
+      } else {
+        let savedCharacter = await addCharacter(newCharObj);
+        await renderCharacterList();
+        showToast(`✨ ${savedCharacter.name} created!`);
+        await createNewThreadWithCharacterId(savedCharacter.id, { scene: chosenScene });
+      }
+    } catch (err) {
+      console.error("[AI Character Creator] Error:", err);
+      window.finishTaskToast(taskId, "error");
+      showToast("❌ Couldn't generate character: " + (err && err.message ? err.message : String(err)));
+    }
+  };
   $.addCharacterOptionsButton.addEventListener("click", async function() {  
     hideEl($.threadOptionsPopup);
     await showAddCharacterShortcutToThreadPopup();
